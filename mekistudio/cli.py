@@ -66,12 +66,19 @@ def _schedule_reinstall(root: Path) -> bool:
     Retourne True si la réinstallation est différée (asynchrone, Windows),
     False si elle a été faite de façon synchrone (POSIX). Lève sur échec POSIX.
     """
-    cmd = ["uv", "tool", "install", "--force", str(root)]
+    # --reinstall : sans lui, uv ressert un wheel en cache pour la même
+    # version et le nouveau code n'est jamais pris en compte.
+    cmd = ["uv", "tool", "install", "--reinstall", "--force", str(root)]
 
     if sys.platform == "win32":
         # PowerShell détaché : petite attente que l'exe courant se libère,
-        # puis install. Path en guillemets simples (pas d'échappement des \).
-        script = f"Start-Sleep -Seconds 2; uv tool install --force '{root}'"
+        # puis install (sortie loggée). Path en guillemets simples (pas
+        # d'échappement des backslashes).
+        script = (
+            "Start-Sleep -Seconds 2; "
+            f"uv tool install --reinstall --force '{root}' "
+            '*> "$env:TEMP\\mekistudio-update.log"'
+        )
         subprocess.Popen(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             creationflags=subprocess.DETACHED_PROCESS
@@ -121,7 +128,7 @@ def update(
     if deferred:
         typer.secho(
             "[mekistudio] mise a jour planifiee en arriere-plan — relance "
-            "`mekistudio serve` dans ~5 s.",
+            "`mekistudio serve` dans ~5 s. (log : %TEMP%\\mekistudio-update.log)",
             fg=typer.colors.GREEN,
         )
     else:
