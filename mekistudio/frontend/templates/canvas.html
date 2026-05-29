@@ -10,6 +10,8 @@
        qui doit être écouté avant qu'Alpine ne démarre. -->
   <script defer src="/static/js/canvas.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- éditeur CodeMirror : module ESM, expose window.MekiEditor (chargé en async). -->
+  <script type="module" src="/static/js/editor.js"></script>
 </head>
 <body>
   <div id="canvas" x-data="canvas"

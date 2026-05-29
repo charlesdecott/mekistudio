@@ -25,10 +25,23 @@ def ensure_meki_dir(root: Path) -> Manifest:
 
     cpath = paths.canvas_path(root)
     if not cpath.exists():
-        # Canvas neuf seedé avec le kernelNode : le canvas n'est jamais vide.
+        # Canvas neuf seedé avec les nodes built-in : le canvas n'est jamais vide.
         _write_json(cpath, default_canvas().model_dump(mode="json"))
 
+    _ensure_builtin_nodes(root)
     return manifest
+
+
+def _ensure_builtin_nodes(root: Path) -> None:
+    """Ajoute au canvas les nodes built-in absents (cas d'un canvas.json antérieur
+    à l'ajout d'un node) : les built-in doivent toujours être présents. Ne persiste
+    que si quelque chose manquait — les ids restent donc stables."""
+    state = load_canvas(root)
+    have = {n.kind for n in state.nodes}
+    missing = [n for n in default_canvas().nodes if n.kind not in have]
+    if missing or not paths.canvas_path(root).exists():
+        state.nodes.extend(missing)
+        save_canvas(root, state)
 
 
 def load_canvas(root: Path) -> CanvasState:

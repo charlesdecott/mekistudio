@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from mekistudio.backend.components import (
+    EditorComponent,
     FileTreeComponent,
     HeaderComponent,
     LayoutComponent,
@@ -8,8 +9,10 @@ from mekistudio.backend.components import (
 )
 from mekistudio.backend.models import CanvasState
 from mekistudio.backend.nodes import (
+    FILE_EDITOR_KIND,
     FILE_EXPLORER_KIND,
     KERNEL_KIND,
+    build_file_editor_node,
     build_file_explorer_node,
     build_kernel_node,
     build_node,
@@ -60,16 +63,26 @@ def test_kernel_is_not_configurable():
     assert build_kernel_node().configurable is False
 
 
+def test_build_file_editor_node_structure():
+    node = build_file_editor_node()
+    assert node.kind == FILE_EDITOR_KIND
+    assert node.movable is True and node.resizable is True
+    editor = node.root.children[0].children[0]
+    assert isinstance(editor, EditorComponent)
+    assert editor.file_path == ""
+
+
 def test_build_node_by_kind():
     assert build_node(KERNEL_KIND).kind == KERNEL_KIND
     assert build_node(FILE_EXPLORER_KIND).kind == FILE_EXPLORER_KIND
+    assert build_node(FILE_EDITOR_KIND).kind == FILE_EDITOR_KIND
 
 
 def test_default_canvas_has_builtin_nodes():
     canvas = default_canvas()
     assert isinstance(canvas, CanvasState)
     kinds = {n.kind for n in canvas.nodes}
-    assert kinds == {KERNEL_KIND, FILE_EXPLORER_KIND}
+    assert kinds == {KERNEL_KIND, FILE_EXPLORER_KIND, FILE_EDITOR_KIND}
 
 
 def test_canvas_with_node_roundtrip():

@@ -45,10 +45,24 @@ class FileTreeComponent(ComponentBase):
     excludes: list[str] = Field(default_factory=lambda: ["__pycache__"])
 
 
+class EditorComponent(ComponentBase):
+    """Éditeur de fichier (CodeMirror côté front). Porte le chemin du fichier
+    ouvert (relatif au repo, posix) ; le contenu est lu/écrit via /api/file."""
+
+    type: Literal["editor"] = "editor"
+    file_path: str = ""
+
+
 # Union discriminée : le champ `type` sélectionne la classe au parsing. C'est
 # ce qui permet de (dé)sérialiser un arbre hétérogène sans perdre les types.
 Component = Annotated[
-    Union[NodeComponent, LayoutComponent, HeaderComponent, FileTreeComponent],
+    Union[
+        NodeComponent,
+        LayoutComponent,
+        HeaderComponent,
+        FileTreeComponent,
+        EditorComponent,
+    ],
     Field(discriminator="type"),
 ]
 

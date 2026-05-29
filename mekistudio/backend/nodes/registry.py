@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Callable
 
 from mekistudio.backend.models import CanvasState, Node
-from mekistudio.backend.nodes import file_explorer, kernel
+from mekistudio.backend.nodes import file_editor, file_explorer, kernel
 
 # kind -> fabrique de node. Unique endroit qui connaît tous les kinds ; on
 # grandira ce registre node après node (chat, git, ...).
 NODE_BUILDERS: dict[str, Callable[..., Node]] = {
     kernel.KIND: kernel.build_kernel_node,
     file_explorer.KIND: file_explorer.build_file_explorer_node,
+    file_editor.KIND: file_editor.build_file_editor_node,
 }
 
 
@@ -44,5 +45,6 @@ def default_canvas() -> CanvasState:
         nodes=[
             kernel.build_kernel_node(),
             file_explorer.build_file_explorer_node(),
+            file_editor.build_file_editor_node(),
         ]
     )
