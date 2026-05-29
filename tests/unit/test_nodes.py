@@ -102,3 +102,36 @@ def test_canvas_roundtrip_preserves_source_id():
     n = Node(kind="fileeditor", source_id="abc", root=NodeComponent(children=[]))
     state = CanvasState(nodes=[n])
     assert CanvasState.model_validate(state.model_dump(mode="json")).nodes[0].source_id == "abc"
+
+
+def test_default_canvas_links_explorer_to_kernel():
+    from mekistudio.backend.nodes import default_canvas
+    state = default_canvas()
+    k = next(n for n in state.nodes if n.kind == "kernel")
+    e = next(n for n in state.nodes if n.kind == "fileexplorer")
+    assert k.source_id is None
+    assert e.source_id == k.id
+
+
+def test_reconcile_source_links_repairs_absent_and_dangling():
+    from mekistudio.backend.nodes import default_canvas, reconcile_source_links
+    state = default_canvas()
+    k = next(n for n in state.nodes if n.kind == "kernel")
+    e = next(n for n in state.nodes if n.kind == "fileexplorer")
+    e.source_id = None                      # absent
+    reconcile_source_links(state)
+    assert e.source_id == k.id
+    e.source_id = "ghost"                   # dangling
+    reconcile_source_links(state)
+    assert e.source_id == k.id
+    before = e.source_id                     # idempotent
+    reconcile_source_links(state)
+    assert e.source_id == before
+
+
+def test_canonical_parent_id():
+    from mekistudio.backend.nodes import canonical_parent_id, default_canvas
+    state = default_canvas()
+    k = next(n for n in state.nodes if n.kind == "kernel")
+    assert canonical_parent_id(state, "fileexplorer") == k.id
+    assert canonical_parent_id(state, "kernel") is None
