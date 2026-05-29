@@ -80,7 +80,14 @@
     return 'M ' + pts.map((p) => p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' L ');
   }
 
-  const MekiCables = { STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor, assignLanes, subwayPoints, pointsToPath };
+  function cableClass(kindChild, kindParent) {
+    const pair = kindChild + '>' + kindParent;
+    if (pair === 'fileexplorer>kernel') return 'k2e';
+    if (pair === 'fileeditor>fileexplorer') return 'e2e';
+    return 'cable-default';
+  }
+
+  const MekiCables = { STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor, assignLanes, subwayPoints, pointsToPath, cableClass };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiCables;
   if (typeof window !== 'undefined') window.MekiCables = MekiCables;
 })();
