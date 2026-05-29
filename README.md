@@ -16,18 +16,22 @@ puis ouvre le canvas principal.
 ## Installer en global (commande `mekistudio` sur le PATH)
 
 ```bash
-uv tool install --force .      # depuis la racine du repo
-mekistudio serve               # lançable de n'importe où
+uv tool install --editable --force .   # depuis la racine du repo
+mekistudio serve                       # lançable de n'importe où
 ```
+
+L'install **editable** fait pointer l'outil global vers ce repo : le code est
+lu en direct. Éditer la source (ou `git pull`) est pris en compte au prochain
+`mekistudio serve` — aucun rebuild, aucun exe à réécrire.
 
 ## Se mettre à jour
 
 ```bash
-mekistudio update              # git pull (si remote) + reconstruit l'outil global
+mekistudio update              # git pull la source (le code editable est live)
 ```
 
-Le swap prend effet au prochain lancement (un exe en cours ne peut être
-écrasé) — relance `mekistudio serve` ensuite.
+Si les **dépendances** (`pyproject.toml`) ont changé, relance, studio arrêté :
+`uv tool install --editable --force .`
 
 ## Tests
 

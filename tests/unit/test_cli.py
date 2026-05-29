@@ -27,51 +27,30 @@ class _FakeProc:
         self.returncode = returncode
 
 
-def _install_was_issued(run_calls, popen_calls, repo):
-    """L'install global est émise via subprocess.run (POSIX, synchrone) OU
-    subprocess.Popen (Windows, process détaché). Doit forcer --reinstall pour
-    ne pas resservir un wheel en cache. Vrai dans les deux cas."""
-    for cmd in run_calls:
-        if cmd[:5] == ["uv", "tool", "install", "--reinstall", "--force"] and cmd[5] == str(repo):
-            return True
-    for cmd in popen_calls:
-        joined = " ".join(cmd)
-        if "uv tool install --reinstall --force" in joined and str(repo) in joined:
-            return True
-    return False
-
-
-def test_update_reinstalls_global_tool(tmp_path, monkeypatch):
-    run_calls, popen_calls = [], []
-    monkeypatch.setattr(
-        "mekistudio.cli.subprocess.run",
-        lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
-    )
-    monkeypatch.setattr(
-        "mekistudio.cli.subprocess.Popen", lambda cmd, *a, **k: popen_calls.append(cmd)
-    )
-
-    result = CliRunner().invoke(app, ["update", "--repo", str(tmp_path), "--no-pull"])
-
-    assert result.exit_code == 0, result.output
-    # Sans --pull : pas de git, mais l'outil global est bien reconstruit.
-    assert not any(c[:1] == ["git"] for c in run_calls)
-    assert _install_was_issued(run_calls, popen_calls, tmp_path)
-
-
-def test_update_pulls_then_reinstalls(tmp_path, monkeypatch):
+def test_update_pulls_the_source(tmp_path, monkeypatch):
     (tmp_path / ".git").mkdir()
-    run_calls, popen_calls = [], []
+    run_calls = []
     monkeypatch.setattr(
         "mekistudio.cli.subprocess.run",
         lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
-    )
-    monkeypatch.setattr(
-        "mekistudio.cli.subprocess.Popen", lambda cmd, *a, **k: popen_calls.append(cmd)
     )
 
     result = CliRunner().invoke(app, ["update", "--repo", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert run_calls[0] == ["git", "-C", str(tmp_path), "pull", "--ff-only"]
-    assert _install_was_issued(run_calls, popen_calls, tmp_path)
+    # Install editable : le code est live, un git pull suffit (pas de reinstall).
+    assert run_calls == [["git", "-C", str(tmp_path), "pull", "--ff-only"]]
+
+
+def test_update_no_pull_does_nothing_external(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    run_calls = []
+    monkeypatch.setattr(
+        "mekistudio.cli.subprocess.run",
+        lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
+    )
+
+    result = CliRunner().invoke(app, ["update", "--repo", str(tmp_path), "--no-pull"])
+
+    assert result.exit_code == 0, result.output
+    assert run_calls == []  # --no-pull : aucune commande externe
