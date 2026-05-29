@@ -7,3 +7,7 @@ __pycache__/
 .mekistudio/
 out.log
 err.log
+
+# Claude: on versionne settings.json (plugins activés), pas les artefacts runtime
+.claude/*
+!.claude/settings.json
