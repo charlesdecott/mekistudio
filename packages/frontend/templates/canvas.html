@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ project_name }} — mekistudio</title>
+  <link rel="stylesheet" href="/static/css/canvas.css">
+  <script>window.__PROJECT_NAME__ = {{ project_name | tojson }};</script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="/static/js/canvas.js"></script>
+</head>
+<body>
+  <div id="canvas" x-data="canvas()" x-init="init()"
+       :style="gridStyle()"
+       @mousedown="startPan($event)" @mousemove="onPan($event)"
+       @mouseup="endPan()" @mouseleave="endPan()"
+       @wheel.prevent="onZoom($event)">
+    <div class="hud" x-text="projectName"></div>
+    <div class="world" :style="worldStyle()"></div>
+  </div>
+</body>
+</html>
