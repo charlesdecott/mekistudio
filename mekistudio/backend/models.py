@@ -33,6 +33,7 @@ class Node(BaseModel):
     y: float = 0.0
     w: float | None = None
     h: float | None = None
+    source_id: str | None = None  # parent logique (câble dérivé). None = racine (kernel).
     movable: bool = True
     resizable: bool = True
     configurable: bool = False  # affiche un engrenage (modale de réglages)
@@ -42,8 +43,8 @@ class Node(BaseModel):
 
 
 class CanvasState(BaseModel):
-    """État du canvas. `nodes` est désormais typé (seam branché au premier vrai
-    node) ; `edges` reste en list[dict] tant qu'on n'a pas de câbles/wires."""
+    """État du canvas. `nodes` est typé. Les câbles sont DÉRIVÉS de `Node.source_id`
+    (arbre kernel→explorer→éditeurs) ; `edges` reste réservé/inutilisé."""
 
     schema_version: int = 1
     nodes: list[Node] = Field(default_factory=list)
