@@ -1,5 +1,19 @@
 * { margin: 0; box-sizing: border-box; }
 [x-cloak] { display: none !important; }
+
+/* Scrollbar discrète, PARTAGÉE par toutes les zones scrollables (explorateur,
+   éditeur/CodeMirror, modale, futurs nodes) : piste transparente + pouce fin
+   translucide flottant. Un seul endroit à maintenir. Firefox + WebKit/Chromium. */
+* { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .2) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .16);
+  border: 2px solid transparent;       /* pouce qui ne touche pas les bords */
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, .32); }
 html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 #canvas {
   position: relative;
@@ -75,10 +89,10 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 /* --- node éditeur (CodeMirror) --- */
 .cmp-editor { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .editor-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 8px; padding: 0 2px 8px; flex: none;
+  display: flex; align-items: center; gap: 6px; padding: 0 2px 8px; flex: none;
 }
 .editor-name {
+  flex: 1 1 auto; min-width: 0;
   font-size: 12px; color: #9aa4b2;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -89,6 +103,12 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 }
 .editor-save:hover:not(:disabled) { background: #34405a; }
 .editor-save:disabled { opacity: .45; cursor: default; }
+.editor-close {
+  flex: none; width: 24px; height: 24px; padding: 0;
+  border: 1px solid #2c3650; border-radius: 6px;
+  background: #2a3242; color: #9aa4b2; cursor: pointer; font-size: 12px;
+}
+.editor-close:hover { background: #5a2d34; color: #f0c0c0; }
 .editor-cm { flex: 1 1 auto; min-height: 0; overflow: hidden; border-radius: 8px; }
 .editor-cm.editor-unavailable {
   display: flex; align-items: center; justify-content: center;
@@ -185,19 +205,4 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .fs-name { color: #d6dae3; overflow: hidden; text-overflow: ellipsis; }
 .fs-error { color: #e0a070; cursor: default; }
 .fs-error:hover { background: none; }
-
-/* scrollbar discrète (dark) : piste transparente + pouce fin et translucide,
-   au lieu du gros rectangle blanc par défaut. Firefox + WebKit/Chromium. */
-.cmp-filetree {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, .2) transparent;
-}
-.cmp-filetree::-webkit-scrollbar { width: 10px; height: 10px; }
-.cmp-filetree::-webkit-scrollbar-track { background: transparent; }
-.cmp-filetree::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, .16);
-  border: 2px solid transparent;   /* pouce "flottant" qui ne touche pas les bords */
-  background-clip: padding-box;
-  border-radius: 8px;
-}
-.cmp-filetree::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, .32); }
+/* (scrollbar discrète : voir la règle globale en tête de fichier) */

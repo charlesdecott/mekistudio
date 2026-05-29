@@ -79,10 +79,11 @@ def test_build_node_by_kind():
 
 
 def test_default_canvas_has_builtin_nodes():
+    # Built-in = kernel + explorateur. L'éditeur est dynamique (spawné au double-clic).
     canvas = default_canvas()
     assert isinstance(canvas, CanvasState)
     kinds = {n.kind for n in canvas.nodes}
-    assert kinds == {KERNEL_KIND, FILE_EXPLORER_KIND, FILE_EDITOR_KIND}
+    assert kinds == {KERNEL_KIND, FILE_EXPLORER_KIND}
 
 
 def test_canvas_with_node_roundtrip():

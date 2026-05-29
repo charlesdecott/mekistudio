@@ -50,6 +50,7 @@ window.MekiEditor = {
           history(),
           indentOnInput(),
           bracketMatching(),
+          EditorView.lineWrapping,    // word-wrap automatique (pas de scroll horizontal)
           oneDark,                    // thème sombre + coloration des tokens
           indentationMarkers(),       // guides de blocs d'indentation
           langComp.of(languageFor(opts.path)),

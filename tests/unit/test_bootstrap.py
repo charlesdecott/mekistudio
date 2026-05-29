@@ -30,7 +30,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
     assert isinstance(state, CanvasState)
     assert state.viewport == Viewport()  # défauts, pas de crash
     # Invariant « jamais vide » : on retombe sur le canvas par défaut (built-in).
-    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer", "fileeditor"}
+    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer"}
     # Le fichier corrompu est préservé en .bak (pas de perte silencieuse).
     assert cpath.with_name(cpath.name + ".bak").read_text(encoding="utf-8") == "{ pas du json"
 
@@ -38,21 +38,35 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
 def test_fresh_canvas_seeds_builtin_nodes(tmp_path):
     bootstrap.ensure_meki_dir(tmp_path)
     state = bootstrap.load_canvas(tmp_path)
-    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer", "fileeditor"}
+    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer"}
 
 
 def test_ensure_adds_missing_builtin_nodes(tmp_path):
-    # Canvas antérieur à l'ajout d'un node (ici : pas d'éditeur).
+    # Canvas auquel il manque un built-in (ici l'explorateur) -> ré-ajouté.
     bootstrap.ensure_meki_dir(tmp_path)
     state = bootstrap.load_canvas(tmp_path)
-    state.nodes = [n for n in state.nodes if n.kind != "fileeditor"]
+    state.nodes = [n for n in state.nodes if n.kind != "fileexplorer"]
     bootstrap.save_canvas(tmp_path, state)
-    assert "fileeditor" not in {n.kind for n in bootstrap.load_canvas(tmp_path).nodes}
-    # Au prochain bootstrap, le node manquant est rajouté.
     bootstrap.ensure_meki_dir(tmp_path)
     assert {n.kind for n in bootstrap.load_canvas(tmp_path).nodes} == {
-        "kernel", "fileexplorer", "fileeditor"
+        "kernel", "fileexplorer"
     }
+
+
+def test_ensure_does_not_re_add_dynamic_editor(tmp_path):
+    # Un éditeur (node dynamique, pas built-in) fermé ne doit pas réapparaître.
+    from mekistudio.backend.nodes import build_file_editor_node
+
+    bootstrap.ensure_meki_dir(tmp_path)
+    state = bootstrap.load_canvas(tmp_path)
+    state.nodes.append(build_file_editor_node())
+    bootstrap.save_canvas(tmp_path, state)
+    # on le retire puis bootstrap : il ne revient pas (pas un built-in)
+    state2 = bootstrap.load_canvas(tmp_path)
+    state2.nodes = [n for n in state2.nodes if n.kind != "fileeditor"]
+    bootstrap.save_canvas(tmp_path, state2)
+    bootstrap.ensure_meki_dir(tmp_path)
+    assert "fileeditor" not in {n.kind for n in bootstrap.load_canvas(tmp_path).nodes}
 
 
 def test_load_reconciles_kind_constraints(tmp_path):

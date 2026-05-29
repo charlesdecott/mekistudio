@@ -35,11 +35,16 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   - **Réglages de node** : node `configurable` → engrenage (hors coin haut-droit
     quand sélectionné) → modale. fileExplorer : liste d'exclusions éditable
     (défaut `__pycache__`, bornée, noms simples), `POST /api/canvas/nodes/{id}/settings`.
-  - `fileEditor` : éditeur CodeMirror 6 (coloration, guides d'indentation), lit/
-    édite/sauve un fichier (`/api/file`, écriture atomique sandboxée). Clic sur un
-    fichier de l'explorateur → l'ouvre (`POST /api/canvas/nodes/{id}/open`). Node
-    socle ; dérivés notés dans [`IDEAS.md`](IDEAS.md).
-  - Reste : ajout/suppression de nodes via API, câbles/wires, WebSocket.
+  - `fileEditor` (dynamique) : éditeur CodeMirror 6 (coloration, guides
+    d'indentation, **word-wrap**), lit/édite/sauve un fichier (`/api/file`,
+    écriture atomique sandboxée). **Double-clic** sur un fichier de l'explorateur
+    → spawn un node éditeur en cascade près de l'explorateur ; **bouton fermer**
+    (warning si non sauvegardé). Multi-éditeurs. Node socle ; dérivés dans
+    [`IDEAS.md`](IDEAS.md).
+  - **Création/suppression de nodes** : `POST /api/canvas/nodes` (kind, borné,
+    rejet non-fini) · `DELETE /api/canvas/nodes/{id}` (built-in non supprimables).
+    Clic = node au premier plan ; scrollbar discrète globale.
+  - Reste : câbles/wires entre nodes, WebSocket (multi-onglets), palette d'ajout.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 
