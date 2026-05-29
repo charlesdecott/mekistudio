@@ -28,7 +28,12 @@ lu en direct. Éditer la source (ou `git pull`) est pris en compte au prochain
 
 ```bash
 mekistudio update              # git pull la source (le code editable est live)
+mekistudio update --restart    # arrête l'instance en cours, pull, relance serve
 ```
+
+`--restart` arrête le `serve` en cours (via `.mekistudio/serve.pid`), fait le
+`git pull`, puis relance un `serve` **frais** en avant-plan (il réimporte le
+code à jour). `--port` choisit le port relancé (défaut 8777).
 
 Si les **dépendances** (`pyproject.toml`) ont changé, relance, studio arrêté :
 `uv tool install --editable --force .`
