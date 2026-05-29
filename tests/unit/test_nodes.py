@@ -89,3 +89,16 @@ def test_default_canvas_has_builtin_nodes():
 def test_canvas_with_node_roundtrip():
     canvas = default_canvas()
     assert CanvasState.model_validate(canvas.model_dump(mode="json")) == canvas
+
+
+def test_node_has_source_id_default_none():
+    from mekistudio.backend.nodes import build_kernel_node
+    assert build_kernel_node().source_id is None
+
+
+def test_canvas_roundtrip_preserves_source_id():
+    from mekistudio.backend.models import CanvasState, Node
+    from mekistudio.backend.components import NodeComponent
+    n = Node(kind="fileeditor", source_id="abc", root=NodeComponent(children=[]))
+    state = CanvasState(nodes=[n])
+    assert CanvasState.model_validate(state.model_dump(mode="json")).nodes[0].source_id == "abc"
