@@ -37,6 +37,7 @@ document.addEventListener('alpine:init', () => {
       this.renderNodes(nodes);
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
+      this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
     },
 
     // Rendu des nodes en DOM direct : Alpine gère le pan/zoom du canvas, le
@@ -55,6 +56,7 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.movable = node.movable !== false;
       wrap.dataset.resizable = node.resizable !== false;
       wrap.dataset.configurable = node.configurable === true;
+      wrap.dataset.source = node.source_id || ''; // graphe de câbles lu depuis le DOM
       this.applyBox(wrap, node);
       wrap.appendChild(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
@@ -68,6 +70,104 @@ document.addEventListener('alpine:init', () => {
       wrap.style.height = node.h != null ? node.h + 'px' : '';
       wrap.classList.toggle('sized', node.w != null || node.h != null);
     },
+
+    // Layer SVG unique des câbles, premier enfant de .world. Idempotent.
+    ensureCablesLayer() {
+      const world = this.$root.querySelector('.world');
+      if (!world) return null;
+      let svg = world.querySelector('svg.cables');
+      if (!svg) {
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'cables');
+      }
+      if (world.firstChild !== svg) world.insertBefore(svg, world.firstChild);
+      return svg;
+    },
+
+    // Lit les boîtes de tous les nodes depuis le DOM : Map id -> {box, kind, source}.
+    nodeBoxes() {
+      const map = new Map();
+      this.$root.querySelectorAll('.node-wrap').forEach((w) => {
+        map.set(w.dataset.id, {
+          box: { x: parseFloat(w.style.left) || 0, y: parseFloat(w.style.top) || 0,
+                 w: w.offsetWidth, h: w.offsetHeight },
+          kind: w.dataset.kind || '',
+          source: w.dataset.source || '',
+        });
+      });
+      return map;
+    },
+
+    // Recalcule et trace tous les câbles depuis une Map de boîtes (DOM impératif).
+    drawCablesFrom(nodes) {
+      const svg = this.ensureCablesLayer();
+      if (!svg) return;
+      const C = window.MekiCables;
+      // 1) câbles enfant -> parent présent
+      const cables = [];
+      nodes.forEach((info, id) => {
+        if (info.source && nodes.has(info.source)) cables.push({ id, parent: info.source });
+      });
+      // 2) côté choisi à chaque extrémité
+      const sides = cables.map((cab) => ({
+        child: C.adaptiveSide(nodes.get(cab.id).box, nodes.get(cab.parent).box),
+        parent: C.adaptiveSide(nodes.get(cab.parent).box, nodes.get(cab.id).box),
+      }));
+      // 3) regroupe par (node, côté) pour attribuer les lanes aux DEUX extrémités
+      const groups = new Map();
+      const push = (nodeId, side, neighbor, ref) => {
+        const k = nodeId + '|' + side;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push({ neighbor, ref });
+      };
+      cables.forEach((cab, i) => {
+        push(cab.id, sides[i].child, nodes.get(cab.parent).box, { i, end: 'child' });
+        push(cab.parent, sides[i].parent, nodes.get(cab.id).box, { i, end: 'parent' });
+      });
+      const offChild = new Array(cables.length).fill(0);
+      const offParent = new Array(cables.length).fill(0);
+      groups.forEach((list, key) => {
+        const cut = key.lastIndexOf('|');
+        const box = nodes.get(key.slice(0, cut)).box;
+        const offs = C.assignLanes(list, box, key.slice(cut + 1));
+        list.forEach((item, j) => {
+          if (item.ref.end === 'child') offChild[item.ref.i] = offs[j];
+          else offParent[item.ref.i] = offs[j];
+        });
+      });
+      // 4) trace chaque câble (halo + net), masque si boîtes ~confondues
+      const seen = new Set();
+      cables.forEach((cab, i) => {
+        const a = nodes.get(cab.id), b = nodes.get(cab.parent);
+        const dist = Math.hypot((a.box.x + a.box.w / 2) - (b.box.x + b.box.w / 2),
+                                (a.box.y + a.box.h / 2) - (b.box.y + b.box.h / 2));
+        let g = svg.querySelector('g[data-edge="' + cab.id + '"]');
+        if (dist < C.HIDE_DIST) { if (g) g.remove(); return; }
+        seen.add(cab.id);
+        const anchorA = C.sideAnchor(a.box, sides[i].child, offChild[i]);
+        const anchorB = C.sideAnchor(b.box, sides[i].parent, offParent[i]);
+        const d = C.pointsToPath(C.subwayPoints(anchorA, sides[i].child, anchorB, sides[i].parent));
+        if (!g) {
+          g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+          g.dataset.edge = cab.id;
+          for (const cls of ['cable-halo', 'cable-core']) {
+            const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            p.setAttribute('class', cls);
+            g.appendChild(p);
+          }
+          svg.appendChild(g);
+        }
+        g.setAttribute('class', 'cable ' + C.cableClass(a.kind, b.kind));
+        g.querySelector('.cable-halo').setAttribute('d', d);
+        g.querySelector('.cable-core').setAttribute('d', d);
+      });
+      // 5) supprime les <g> orphelins
+      svg.querySelectorAll('g[data-edge]').forEach((g) => {
+        if (!seen.has(g.dataset.edge)) g.remove();
+      });
+    },
+
+    drawCables() { this.drawCablesFrom(this.nodeBoxes()); },
 
     // Interaction d'un node selon l'outil actif. Un node ne déclenche jamais le
     // pan du canvas (stopPropagation systématique vers #canvas).
