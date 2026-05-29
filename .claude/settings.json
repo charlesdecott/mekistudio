@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "understand-anything@understand-anything": true,
+    "oh-my-claude@oh-my-claude": true,
+    "superpowers@claude-plugins-official": true
+  }
+}
