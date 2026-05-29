@@ -136,18 +136,48 @@ document.addEventListener('alpine:init', () => {
           else offParent[item.ref.i] = offs[j];
         });
       });
-      // 4) trace chaque câble (halo + net), masque si boîtes ~confondues
-      const seen = new Set();
-      cables.forEach((cab, i) => {
+      // 4a) tracé de chaque câble : CONTOURNEMENT des autres nodes (obstacles gonflés
+      // de PAD), masque si boîtes ~confondues (HIDE_DIST).
+      const PAD = C.STUB;
+      const obstaclesFor = (cab) => {
+        const obs = [];
+        nodes.forEach((info, oid) => {
+          if (oid === cab.id || oid === cab.parent) return;
+          const o = info.box;
+          obs.push({ x: o.x - PAD, y: o.y - PAD, w: o.w + 2 * PAD, h: o.h + 2 * PAD });
+        });
+        return obs;
+      };
+      const routeOf = (i) => {
+        const a = nodes.get(cables[i].id), b = nodes.get(cables[i].parent);
+        const anchorA = C.sideAnchor(a.box, sides[i].child, offChild[i]);
+        const anchorB = C.sideAnchor(b.box, sides[i].parent, offParent[i]);
+        return C.routeAround(anchorA, sides[i].child, anchorB, sides[i].parent, obstaclesFor(cables[i]));
+      };
+      const routes = cables.map((cab, i) => {
         const a = nodes.get(cab.id), b = nodes.get(cab.parent);
         const dist = Math.hypot((a.box.x + a.box.w / 2) - (b.box.x + b.box.w / 2),
                                 (a.box.y + a.box.h / 2) - (b.box.y + b.box.h / 2));
+        return dist < C.HIDE_DIST ? null : routeOf(i);
+      });
+      // 4b) ESCAPE : si un câble passe ENCORE sous un node (aucun couloir 45° via la face
+      // naturelle), on CHANGE la face de la node concernée (pur 45°) plutôt que de le laisser
+      // traverser. (L'anti-superposition des CÂBLES est différée — cf. spec §12 / IDEAS.)
+      routes.forEach((r, i) => {
+        if (!r) return;
+        const obs = obstaclesFor(cables[i]);
+        if (!C.pathHits(r, obs)) return;
+        const a = nodes.get(cables[i].id), b = nodes.get(cables[i].parent);
+        routes[i] = C.routeAvoiding(a.box, sides[i].child, b.box, sides[i].parent, obs).pts;
+      });
+      // 4c) trace (halo + net)
+      const seen = new Set();
+      cables.forEach((cab, i) => {
         let g = svg.querySelector('g[data-edge="' + cab.id + '"]');
-        if (dist < C.HIDE_DIST) { if (g) g.remove(); return; }
+        if (!routes[i]) { if (g) g.remove(); return; }
         seen.add(cab.id);
-        const anchorA = C.sideAnchor(a.box, sides[i].child, offChild[i]);
-        const anchorB = C.sideAnchor(b.box, sides[i].parent, offParent[i]);
-        const d = C.pointsToPath(C.subwayPoints(anchorA, sides[i].child, anchorB, sides[i].parent));
+        const a = nodes.get(cab.id), b = nodes.get(cab.parent);
+        const d = C.pointsToPath(routes[i]);
         if (!g) {
           g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
           g.dataset.edge = cab.id;

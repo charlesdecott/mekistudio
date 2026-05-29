@@ -1460,3 +1460,28 @@ git commit -m "docs(roadmap): câbles/wires + impulsions livrés"
 ## Note de coexistence
 
 La spec anti-collision (`IDEAS.md`) touche aussi `onNodeMouseDown`/`onMove`/`init`/spawn. Points d'insertion **distincts** (collision = positions des nodes ; câbles = `drawCables*`). Si les deux features sont implémentées, merger sans écraser les hooks de l'autre (les `drawCables()` s'ajoutent après les manipulations de position).
+
+---
+
+# PHASE 3 — Contournement pur 45° + changement de face (livré)
+
+Demandé après validation Phase 1 (cf. spec §12, D15/D17). **Pur 45°** (90° rejeté).
+Implémenté en TDD ; `node --test` **17/17** ; validé honnêtement au navigateur. Fichiers :
+`cables.js`, `cables.test.js`, `canvas.js` (`drawCablesFrom`).
+
+- **T17 — Up-and-over 45° (`routeAround`)** : `segHitsBox` (Liang-Barsky) + `pathHits` +
+  `routeAroundH` (couloir au-dessus/en dessous, le plus court) + `routeAround` (dispatch
+  H / V-par-réflexion). Branché `drawCablesFrom` 4a (`obstacles` = autres nodes gonflés de `STUB`).
+- **T18 — Changement de face (`routeAvoiding`)** : `route45OrNull` (tracé 45° dégageant ou
+  null) + `routeAvoiding` (essaie les faces de la node concernée, garde le 45° le plus court qui
+  dégage ; repli droit seulement si aucune face). Branché `drawCablesFrom` 4b (**escape** : si
+  `pathHits` encore vrai après 4a). Tests : sans obstacle → faces naturelles ; dense → ne passe
+  pas sous le node (45°) ; collé à la source → change de face.
+- **T18-bis — Anti-superposition des CÂBLES : DIFFÉRÉE** (fonctions pures conservées et testées,
+  non branchées — la passe de bump écrasait le changement de face).
+- **T19 — Validation honnête (Playwright)** : sur disposition **dense réelle** sans
+  chevauchement → 0 câble sous un node, contournement appliqué (7 segments), 0 erreur. A révélé
+  **D17** : un obstacle qui **chevauche** une extrémité reste irrésoluble → nécessite
+  l'anti-chevauchement des nodes (spec sœur), prochaine feature.
+
+Chaque étape : test (rouge) → implémentation (vert) → commit.

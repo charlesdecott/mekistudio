@@ -371,3 +371,44 @@ explorer built-in non supprimable).
 10. **Validation navigateur** (Playwright + captures).
 
 Chaque étape : test (rouge) → implémentation (vert) → commit, comme le Jalon 1.
+
+## 12. Raffinements de routage (post-Phase 1, validés en navigateur)
+
+Demandé après la livraison Phase 1. **Pur 45°** : pas de coin à 90° en plein câble (rejeté
+par l'utilisateur). Géométrie **pure** dans `cables.js` (testée `node --test`), branchée dans
+`drawCablesFrom`.
+
+- **D15 — Contournement d'obstacles (pur 45°)** : un câble ne doit pas passer **sous** un node
+  tiers. Deux étages, par ordre de préférence :
+  1. **« up-and-over » 45°** sur la face naturelle — `routeAround(...)` : si le tracé direct
+     traverse une boîte (`segHitsBox`/`pathHits`, Liang-Barsky), router au-dessus/en dessous de
+     l'union des obstacles touchés, à 45° (cas vertical par réflexion x↔y). `obstacles` = boîtes
+     des autres nodes **sauf les 2 extrémités**, gonflées de `STUB`.
+  2. **Changement de face** — si aucun couloir 45° ne dégage sur la face naturelle,
+     `routeAvoiding(srcBox, baseSrc, tgtBox, baseTgt, obstacles)` essaie les **autres faces**
+     (haut/bas/…) de la node concernée et garde le tracé **45° le plus court** qui dégage
+     (petite pénalité par face changée ; `route45OrNull` renvoie null si une face ne passe pas).
+     Effet : la node « la plus proche » de l'obstacle voit sa **face de sortie/entrée changer**,
+     contournement naturel sans coin 90°. Conserve l'invariant segments **H/V/45°**.
+
+  Branchement `drawCablesFrom` : 4a tracé via `routeAround` (avec les lanes du ruban) ; 4b
+  **escape** = si `pathHits` encore vrai → `routeAvoiding` (offset 0). **Repli** (`hit:true`,
+  câble droit) seulement si **aucune face** ne dégage — ce qui n'arrive que si un node
+  **chevauche** une extrémité (cf. dépendance ci-dessous).
+
+- **D16 — Anti-superposition des CÂBLES : DIFFÉRÉE.** Les fonctions pures restent dans
+  `cables.js` (`diagOf`/`diagsOverlap`/`segBBox`/`bboxesOverlap`, testées) mais **ne sont pas
+  branchées** (la passe de bump écrasait le changement de face). À reprendre plus tard.
+
+- **D17 — Dépendance à l'anti-chevauchement des nodes** : le contournement est limité par un
+  fait géométrique — **on ne peut pas faire sortir un câble d'une node pour éviter un obstacle
+  posé sur cette même node**. Tant que des nodes peuvent se **chevaucher**, certains
+  câbles n'ont aucune face dégageante → repli droit (sous le node). Le « zéro recouvrement »
+  est donc un **prérequis** pour des câbles toujours propres. C'est l'objet de la spec sœur
+  [`2026-05-29-canvas-node-collision-design.md`](2026-05-29-canvas-node-collision-design.md)
+  (anti-chevauchement & collision douce), à implémenter ensuite.
+
+Validé honnêtement (Playwright) : sur disposition **dense réelle** sans chevauchement de
+nodes → **0 câble sous un node**, contournement appliqué (câble à 7 segments, face changée),
+0 erreur console ; `node --test` **17/17**. Le seul résidu observé venait de **deux éditeurs
+qui se chevauchaient** (→ D17).
