@@ -54,3 +54,38 @@ def test_update_no_pull_does_nothing_external(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert run_calls == []  # --no-pull : aucune commande externe
+
+
+def test_update_restart_stops_then_relaunches_serve(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    meki = tmp_path / ".mekistudio"
+    meki.mkdir()
+    (meki / "serve.pid").write_text("424242", encoding="utf-8")
+
+    killed, run_calls = [], []
+    monkeypatch.setattr("mekistudio.cli._kill", lambda pid: killed.append(pid))
+    monkeypatch.setattr(
+        "mekistudio.cli.subprocess.run",
+        lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
+    )
+
+    result = CliRunner().invoke(
+        app, ["update", "--repo", str(tmp_path), "--no-pull", "--restart"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert killed == [424242]  # l'instance en cours a été arrêtée
+    assert not (meki / "serve.pid").exists()  # pid nettoyé
+    # un `serve` frais a été relancé
+    assert any("serve" in cmd for cmd in run_calls)
+
+
+def test_stop_running_without_pidfile_is_noop(tmp_path, monkeypatch):
+    from mekistudio import cli
+
+    (tmp_path / ".mekistudio").mkdir()
+    killed = []
+    monkeypatch.setattr("mekistudio.cli._kill", lambda pid: killed.append(pid))
+
+    assert cli._stop_running(tmp_path) is False
+    assert killed == []
