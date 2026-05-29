@@ -43,7 +43,44 @@
     return offs;
   }
 
-  const MekiCables = { STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor, assignLanes };
+  function stubOut(p, side, len) {
+    switch (side) {
+      case 'right': return { x: p.x + len, y: p.y };
+      case 'left':  return { x: p.x - len, y: p.y };
+      case 'top':   return { x: p.x, y: p.y - len };
+      default:      return { x: p.x, y: p.y + len };
+    }
+  }
+
+  // Connecteur entre 2 points : segment droit + UNE diagonale 45° (longueur =
+  // min(|dx|,|dy|)) + segment droit. La diagonale ne déborde jamais.
+  function subwayConnect(B, P) {
+    const dx = P.x - B.x, dy = P.y - B.y;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    const sx = Math.sign(dx) || 1, sy = Math.sign(dy) || 1;
+    if (adx >= ady) {                  // horizontal dominant : H - diag - H
+      const m1 = { x: B.x + sx * (adx - ady) / 2, y: B.y };
+      const m2 = { x: m1.x + sx * ady, y: P.y };
+      return [B, m1, m2, P];
+    }
+    const m1 = { x: B.x, y: B.y + sy * (ady - adx) / 2 }; // vertical dominant : V - diag - V
+    const m2 = { x: P.x, y: m1.y + sy * adx };
+    return [B, m1, m2, P];
+  }
+
+  // Tracé complet : ancre -> stub ⟂ -> connecteur -> stub ⟂ -> ancre.
+  // anchorA / anchorB sont DÉJÀ décalés (offsets de lane inclus).
+  function subwayPoints(anchorA, sideA, anchorB, sideB) {
+    const B = stubOut(anchorA, sideA, STUB);
+    const P = stubOut(anchorB, sideB, STUB);
+    return [anchorA].concat(subwayConnect(B, P)).concat([anchorB]);
+  }
+
+  function pointsToPath(pts) {
+    return 'M ' + pts.map((p) => p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' L ');
+  }
+
+  const MekiCables = { STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor, assignLanes, subwayPoints, pointsToPath };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiCables;
   if (typeof window !== 'undefined') window.MekiCables = MekiCables;
 })();
