@@ -7,6 +7,7 @@ from mekistudio.backend.components.primitives import (
     HeaderComponent,
     LayoutComponent,
     NodeComponent,
+    iter_components,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "LayoutComponent",
     "NodeComponent",
     "FileTreeComponent",
+    "iter_components",
 ]

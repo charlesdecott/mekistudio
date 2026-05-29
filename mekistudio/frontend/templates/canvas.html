@@ -48,6 +48,37 @@
 
     <div class="hud" x-text="projectName"></div>
     <div class="world" :style="worldStyle()"></div>
+
+    <div class="modal-backdrop" x-show="settingsOpen" x-cloak
+         @mousedown.stop @wheel.stop @click="closeSettings()">
+      <div class="modal" @click.stop @mousedown.stop>
+        <div class="modal-head">
+          <span x-text="settingsTitle"></span>
+          <button type="button" class="modal-x" @click="closeSettings()">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-label">Fichiers / dossiers exclus</p>
+          <ul class="exclude-list">
+            <template x-for="(ex, i) in settingsExcludes" :key="i">
+              <li>
+                <span x-text="ex"></span>
+                <button type="button" @click="removeExclude(i)" title="Retirer">✕</button>
+              </li>
+            </template>
+            <li x-show="settingsExcludes.length === 0" class="exclude-empty">aucune exclusion</li>
+          </ul>
+          <form class="exclude-add" @submit.prevent="addExclude()">
+            <input type="text" x-model="newExclude" placeholder="nom simple : .git, node_modules">
+            <button type="submit">Ajouter</button>
+          </form>
+          <p class="modal-error" x-show="settingsError" x-cloak x-text="settingsError"></p>
+        </div>
+        <div class="modal-foot">
+          <button type="button" @click="closeSettings()">Annuler</button>
+          <button type="button" class="primary" @click="saveSettings()">Enregistrer</button>
+        </div>
+      </div>
+    </div>
   </div>
 </body>
 </html>

@@ -35,6 +35,7 @@ class Node(BaseModel):
     h: float | None = None
     movable: bool = True
     resizable: bool = True
+    configurable: bool = False  # affiche un engrenage (modale de réglages)
     max_w: float | None = None
     max_h: float | None = None
     root: NodeComponent

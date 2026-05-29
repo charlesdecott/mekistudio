@@ -1,14 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel
-
-
-# Bruit jamais montré dans l'explorateur : régénéré par les outils, sans intérêt.
-# (set extensible — on pourra y ajouter .git, .DS_Store, etc. au besoin.)
-HIDDEN_NAMES = {"__pycache__"}
 
 
 class FsEntry(BaseModel):
@@ -20,11 +16,12 @@ class FsEntry(BaseModel):
     path: str
 
 
-def list_dir(root: Path, rel: str = "") -> list[FsEntry]:
+def list_dir(root: Path, rel: str = "", excludes: Iterable[str] = ()) -> list[FsEntry]:
     """Liste le contenu de `root/rel`, dossiers d'abord puis fichiers (alpha).
 
     Sandbox : toute cible qui sort de `root` (ex. `..`) est refusée — on ne
-    laisse jamais l'explorateur lire en dehors du repo.
+    laisse jamais l'explorateur lire en dehors du repo. `excludes` : noms
+    masqués (config du node, par défaut `__pycache__`).
     """
     base = root.resolve()
     target = (base / rel).resolve()
@@ -33,11 +30,12 @@ def list_dir(root: Path, rel: str = "") -> list[FsEntry]:
     if not target.is_dir():
         raise ValueError("pas un dossier")
 
+    hidden = set(excludes)
     # Chemin relatif posix dérivé de la cible RÉSOLUE (et non du `rel` brut) :
     # garantit une forme canonique quels que soient les séparateurs reçus.
     rel_base = PurePosixPath(*target.relative_to(base).parts)
     entries = sorted(
-        (p for p in target.iterdir() if p.name not in HIDDEN_NAMES),
+        (p for p in target.iterdir() if p.name not in hidden),
         key=lambda p: (not p.is_dir(), p.name.lower()),
     )
     return [

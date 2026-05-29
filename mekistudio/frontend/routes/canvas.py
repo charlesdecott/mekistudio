@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import math
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mekistudio.backend import bootstrap
+from mekistudio.backend.components import FileTreeComponent, iter_components
 from mekistudio.backend.models import Viewport
 
 router = APIRouter()
@@ -31,6 +33,17 @@ class NodeUpdate(BaseModel):
     y: float | None = None
     w: float | None = None
     h: float | None = None
+
+
+# Un nom d'exclusion : borné (255 = longueur max usuelle d'un nom de fichier).
+_ExcludeName = Annotated[str, Field(max_length=255)]
+
+
+class NodeSettings(BaseModel):
+    """Réglages d'un node configurable. `excludes` : noms masqués (fileExplorer).
+    Borné (≤200) pour ne pas gonfler canvas.json ni la query line de /api/fs."""
+
+    excludes: list[_ExcludeName] | None = Field(default=None, max_length=200)
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -116,6 +129,49 @@ async def update_node(request: Request, node_id: str, upd: NodeUpdate) -> dict:
             node.w = _clamp(upd.w, MIN_W, node.max_w)
         if upd.h is not None:
             node.h = _clamp(upd.h, MIN_H, node.max_h)
+
+        bootstrap.save_canvas(root, state)
+        return node.model_dump(mode="json")
+
+
+@router.post("/api/canvas/nodes/{node_id}/settings")
+async def update_node_settings(
+    request: Request, node_id: str, settings: NodeSettings
+) -> dict:
+    """Met à jour les réglages d'un node configurable. Pour le fileExplorer :
+    la liste d'exclusions du FileTreeComponent."""
+    root = request.app.state.repo_root
+    bootstrap.ensure_meki_dir(root)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        node = next((n for n in state.nodes if n.id == node_id), None)
+        if node is None:
+            raise HTTPException(status_code=404, detail="node introuvable")
+        if not node.configurable:
+            raise HTTPException(status_code=422, detail="node non configurable")
+
+        if settings.excludes is not None:
+            tree = next(
+                (c for c in iter_components(node.root) if isinstance(c, FileTreeComponent)),
+                None,
+            )
+            if tree is not None:
+                # normalise : trim, sans vides, dédoublonné (ordre conservé)
+                clean: list[str] = []
+                for raw in settings.excludes:
+                    name = raw.strip()
+                    if not name:
+                        continue
+                    if "/" in name or "\\" in name:
+                        # filtrage par nom seulement : un séparateur ne matcherait
+                        # jamais -> on rejette pour éviter une fausse impression.
+                        raise HTTPException(
+                            status_code=422,
+                            detail="une exclusion est un nom simple, pas un chemin",
+                        )
+                    if name not in clean:
+                        clean.append(name)
+                tree.excludes = clean
 
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")

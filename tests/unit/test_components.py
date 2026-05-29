@@ -58,6 +58,7 @@ def test_filetree_defaults_and_in_union():
     ft = FileTreeComponent()
     assert ft.type == "filetree"
     assert ft.root_path == ""
+    assert ft.excludes == ["__pycache__"]  # exclusion par défaut
     # parsable via l'union discriminée
     obj = TypeAdapter(Component).validate_python({"type": "filetree", "root_path": "sub"})
     assert isinstance(obj, FileTreeComponent)

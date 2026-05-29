@@ -8,6 +8,14 @@ document.addEventListener('alpine:init', () => {
     projectName: window.__PROJECT_NAME__ || 'mekistudio',
     tool: 'select',          // 'select' | 'move' | 'resize'
     selectedId: null,
+    // modale de réglages (node configurable)
+    settingsOpen: false,
+    settingsTitle: '',
+    settingsExcludes: [],
+    newExclude: '',
+    settingsError: '',
+    settingsNode: null,
+    _settingsTree: null,
     panning: false,
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
@@ -43,8 +51,10 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.kind = node.kind || '';
       wrap.dataset.movable = node.movable !== false;
       wrap.dataset.resizable = node.resizable !== false;
+      wrap.dataset.configurable = node.configurable === true;
       this.applyBox(wrap, node);
       wrap.appendChild(this.renderComponent(node.root));
+      if (node.configurable) wrap.appendChild(this.makeGear(node));
       wrap.addEventListener('mousedown', (e) => this.onNodeMouseDown(e, node, wrap));
       return wrap;
     },
@@ -133,6 +143,90 @@ document.addEventListener('alpine:init', () => {
       this.view.x = window.innerWidth / 2 - cx * this.view.zoom;
       this.view.y = window.innerHeight / 2 - cy * this.view.zoom;
     },
+
+    // --- engrenage + modale de réglages (nodes configurables) ---
+    makeGear(node) {
+      const gear = document.createElement('button');
+      gear.type = 'button';
+      gear.className = 'node-gear';
+      gear.title = 'Réglages';
+      gear.innerHTML =
+        '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"'
+        + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + '<circle cx="12" cy="12" r="3"></circle>'
+        + '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06'
+        + 'a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4'
+        + 'a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82'
+        + ' 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82'
+        + 'l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3'
+        + 'a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83'
+        + 'l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09'
+        + 'a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+      gear.addEventListener('mousedown', (e) => e.stopPropagation());
+      gear.addEventListener('click', (e) => { e.stopPropagation(); this.openSettings(node); });
+      return gear;
+    },
+    findFileTree(c) {
+      if (!c) return null;
+      if (c.type === 'filetree') return c;
+      for (const ch of c.children || []) {
+        const found = this.findFileTree(ch);
+        if (found) return found;
+      }
+      return null;
+    },
+    openSettings(node) {
+      const ft = this.findFileTree(node.root);
+      this.settingsNode = node;
+      this._settingsTree = ft;
+      this.settingsTitle = 'Réglages — ' + (node.kind || 'node');
+      this.settingsExcludes = ft ? [...(ft.excludes || [])] : [];
+      this.newExclude = '';
+      this.settingsError = '';
+      this.settingsOpen = true;
+    },
+    addExclude() {
+      const v = (this.newExclude || '').trim();
+      if (!v) return;
+      if (v.includes('/') || v.includes('\\')) {
+        this.settingsError = 'Un nom simple, pas un chemin (sans / ni \\).';
+        return;
+      }
+      if (!this.settingsExcludes.includes(v)) this.settingsExcludes.push(v);
+      this.newExclude = '';
+      this.settingsError = '';
+    },
+    removeExclude(i) { this.settingsExcludes.splice(i, 1); },
+    closeSettings() { this.settingsOpen = false; this.settingsError = ''; },
+    async saveSettings() {
+      const node = this.settingsNode;
+      if (!node) return;
+      this.settingsError = '';
+      try {
+        const r = await fetch('/api/canvas/nodes/' + node.id + '/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ excludes: this.settingsExcludes }),
+        });
+        if (!r.ok) { this.settingsError = "Échec de l'enregistrement (HTTP " + r.status + ')'; return; }
+      } catch (e) {
+        this.settingsError = 'Échec réseau lors de l\'enregistrement';
+        return;
+      }
+      if (this._settingsTree) this._settingsTree.excludes = [...this.settingsExcludes];
+      this.settingsOpen = false;
+      this.reloadCanvas();
+    },
+    async reloadCanvas() {
+      let state = {};
+      try { const r = await fetch('/api/canvas'); if (r.ok) state = await r.json(); } catch (e) {}
+      this.renderNodes(state.nodes || []);
+      // ré-applique la sélection (sinon l'engrenage du node configuré disparaît)
+      if (this.selectedId) {
+        const w = this.$root.querySelector('.node-wrap[data-id="' + this.selectedId + '"]');
+        if (w) w.classList.add('selected');
+      }
+    },
     renderComponent(c) {
       if (!c || !c.type) return document.createComment('vide');
       if (c.type === 'header') {
@@ -163,7 +257,7 @@ document.addEventListener('alpine:init', () => {
         el.addEventListener('wheel', (ev) => ev.stopPropagation());
         // Container synchrone ; le contenu est chargé en async (fire-and-forget,
         // fsExpand affiche lui-même une ligne d'erreur si le fetch échoue).
-        this.fsExpand(el, c.root_path || '', 0);
+        this.fsExpand(el, c.root_path || '', 0, c.excludes || []);
         return el;
       }
       // type inconnu : fallback visuel plutôt qu'un trou silencieux
@@ -174,10 +268,14 @@ document.addEventListener('alpine:init', () => {
     },
 
     // --- explorateur de fichiers (chargement paresseux via /api/fs) ---
-    async fsExpand(listEl, path, depth) {
+    async fsExpand(listEl, path, depth, excludes) {
+      excludes = excludes || [];
+      const params = new URLSearchParams();
+      params.set('path', path);
+      excludes.forEach((x) => params.append('exclude', x));
       let data;
       try {
-        const r = await fetch('/api/fs?path=' + encodeURIComponent(path));
+        const r = await fetch('/api/fs?' + params.toString());
         if (!r.ok) throw new Error('HTTP ' + r.status);
         data = await r.json();
       } catch (e) {
@@ -186,7 +284,7 @@ document.addEventListener('alpine:init', () => {
         listEl.replaceChildren(this.fsErrorRow(depth));
         return false;
       }
-      listEl.replaceChildren(...(data.entries || []).map((e) => this.fsItem(e, depth)));
+      listEl.replaceChildren(...(data.entries || []).map((e) => this.fsItem(e, depth, excludes)));
       return true;
     },
     fsErrorRow(depth) {
@@ -196,7 +294,7 @@ document.addEventListener('alpine:init', () => {
       row.textContent = '⚠️ échec du chargement';
       return row;
     },
-    fsItem(entry, depth) {
+    fsItem(entry, depth, excludes) {
       const item = document.createElement('div');
       item.className = 'fs-item';
 
@@ -234,7 +332,7 @@ document.addEventListener('alpine:init', () => {
           // loaded posé seulement si le fetch réussit -> un dossier en échec
           // reste réessayable (re-clic) au lieu de rester vide à jamais.
           if (opening && !loaded) {
-            loaded = await this.fsExpand(children, entry.path, depth + 1);
+            loaded = await this.fsExpand(children, entry.path, depth + 1, excludes);
           }
         });
       } else {
