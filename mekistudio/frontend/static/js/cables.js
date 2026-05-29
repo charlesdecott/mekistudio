@@ -29,7 +29,21 @@
     }
   }
 
-  const MekiCables = { STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor };
+  // Attribue des offsets de lane (centrés) aux câbles partageant (node, côté).
+  // cables: [{ neighbor:{x,y,w,h} }] ; retourne les offsets dans l'ordre d'entrée.
+  function assignLanes(cables, box, side) {
+    const n = cables.length;
+    if (n <= 1) return cables.map(() => 0);
+    const tan = (side === 'left' || side === 'right')
+      ? (c) => cy(c.neighbor) : (c) => cx(c.neighbor);
+    const order = cables.map((_, i) => i).sort((i, j) => tan(cables[i]) - tan(cables[j]));
+    const gap = Math.min(GAP_LANE, (sideLength(box, side) - 2 * MARGE) / (n - 1));
+    const offs = new Array(n);
+    order.forEach((origIdx, rank) => { offs[origIdx] = (rank - (n - 1) / 2) * gap; });
+    return offs;
+  }
+
+  const MekiCables = { STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor, assignLanes };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiCables;
   if (typeof window !== 'undefined') window.MekiCables = MekiCables;
 })();
