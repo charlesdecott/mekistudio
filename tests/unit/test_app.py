@@ -31,7 +31,7 @@ def test_get_canvas_returns_state(tmp_path):
     body = r.json()
     # Le canvas neuf est seedé avec les nodes built-in (fini le canvas vide).
     kinds = {n["kind"] for n in body["nodes"]}
-    assert kinds == {"kernel", "fileexplorer"}
+    assert kinds == {"kernel", "fileexplorer", "fileeditor"}
     assert all(n["root"]["type"] == "node" for n in body["nodes"])
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 
@@ -174,6 +174,57 @@ def test_settings_rejects_too_many_excludes(tmp_path):
         json={"excludes": [f"e{i}" for i in range(201)]},
     )
     assert r.status_code == 422
+
+
+def test_file_read_and_write(tmp_path):
+    (tmp_path / "hello.py").write_text("a = 1\n", encoding="utf-8", newline="")
+    client = _client(tmp_path)
+    r = client.get("/api/file", params={"path": "hello.py"})
+    assert r.status_code == 200 and r.json()["content"] == "a = 1\n"
+    w = client.post("/api/file", json={"path": "hello.py", "content": "b = 2\n"})
+    assert w.status_code == 200
+    assert (tmp_path / "hello.py").read_text(encoding="utf-8") == "b = 2\n"
+
+
+def test_file_read_rejects_traversal(tmp_path):
+    r = _client(tmp_path).get("/api/file", params={"path": "../secret"})
+    assert r.status_code == 422
+
+
+def test_open_sets_editor_path_and_persists(tmp_path):
+    (tmp_path / "main.py").write_text("x\n", encoding="utf-8")
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['fileeditor']}/open", json={"path": "main.py"})
+    assert r.status_code == 200
+    nodes = client.get("/api/canvas").json()["nodes"]
+    ed_node = next(n for n in nodes if n["kind"] == "fileeditor")
+    editor = ed_node["root"]["children"][0]["children"][0]
+    assert editor["type"] == "editor" and editor["file_path"] == "main.py"
+
+
+def test_open_invalid_path_is_422(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['fileeditor']}/open", json={"path": "nope.py"})
+    assert r.status_code == 422
+
+
+def test_open_on_non_editor_node_is_422(tmp_path):
+    (tmp_path / "f.py").write_text("x", encoding="utf-8")
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['kernel']}/open", json={"path": "f.py"})
+    assert r.status_code == 422
+
+
+def test_open_rejects_overlong_path(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(
+        f"/api/canvas/nodes/{ids['fileeditor']}/open", json={"path": "a" * 5000}
+    )
+    assert r.status_code == 422  # borne Pydantic (max_length 4096)
 
 
 def test_post_viewport_persists(tmp_path):

@@ -17,11 +17,12 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   dans `docs/old/mekistudio/` (8 docs) et `docs/old/mekistudio-lego/` (4 docs).
 - 🟡 **Jalon 2 — système de composants + premiers nodes** : composants
   primitifs Pydantic (`backend/components/` : `NodeComponent`, `LayoutComponent`,
-  `HeaderComponent` niveaux 1–4, `FileTreeComponent`, union discriminée sur
-  `type`), assemblages dans `backend/nodes/` (`kernel.py`, `file_explorer.py` +
-  `registry.py` avec `NODE_BUILDERS` / `default_canvas()`). **Seam typé** :
-  `CanvasState.nodes` est désormais `list[Node]`. Canvas neuf seedé (kernel +
-  explorateur) ; rendu récursif côté `canvas.js`.
+  `HeaderComponent` niveaux 1–4, `FileTreeComponent`, `EditorComponent`, union
+  discriminée sur `type`), assemblages dans `backend/nodes/` (`kernel.py`,
+  `file_explorer.py`, `file_editor.py` + `registry.py` avec `NODE_BUILDERS` /
+  `default_canvas()`). **Seam typé** : `CanvasState.nodes` est désormais
+  `list[Node]`. Canvas neuf seedé (kernel + explorateur + éditeur) ; rendu
+  récursif côté `canvas.js`.
   - `kernelNode` : header de niveau 1.
   - `fileExplorer` : arbre façon VSCode, dépliage **paresseux** via `GET /api/fs`
     (listing sandboxé au repo, `__pycache__` masqué), icônes emoji par type,
@@ -34,6 +35,10 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   - **Réglages de node** : node `configurable` → engrenage (hors coin haut-droit
     quand sélectionné) → modale. fileExplorer : liste d'exclusions éditable
     (défaut `__pycache__`, bornée, noms simples), `POST /api/canvas/nodes/{id}/settings`.
+  - `fileEditor` : éditeur CodeMirror 6 (coloration, guides d'indentation), lit/
+    édite/sauve un fichier (`/api/file`, écriture atomique sandboxée). Clic sur un
+    fichier de l'explorateur → l'ouvre (`POST /api/canvas/nodes/{id}/open`). Node
+    socle ; dérivés notés dans [`IDEAS.md`](IDEAS.md).
   - Reste : ajout/suppression de nodes via API, câbles/wires, WebSocket.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).

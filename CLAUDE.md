@@ -11,6 +11,7 @@ AI dev studio en **pur Python, sans Docker, auto-hébergé** : un seul repo (`C:
 
 ## Docs
 - `docs/ROADMAP.md` — où on en est + reste à faire (à lire en premier).
+- `docs/IDEAS.md` — boîte à idées (features futures notées au fil de l'eau).
 - `docs/old/{mekistudio,mekistudio-lego}/` — concepts des anciennes versions (à lire avant de réimplémenter un node/backend ; pas de code).
 - `docs/superpowers/` — specs & plans détaillés.
 

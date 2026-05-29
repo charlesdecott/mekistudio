@@ -5,6 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from mekistudio.backend.components import (
     Component,
+    EditorComponent,
     FileTreeComponent,
     HeaderComponent,
     LayoutComponent,
@@ -70,3 +71,12 @@ def test_filetree_nested_in_layout_roundtrip():
     again = NodeComponent.model_validate(tree.model_dump(mode="json"))
     assert again == tree
     assert isinstance(again.children[0].children[0], FileTreeComponent)
+
+
+def test_editor_defaults_and_in_union():
+    ed = EditorComponent()
+    assert ed.type == "editor"
+    assert ed.file_path == ""
+    obj = TypeAdapter(Component).validate_python({"type": "editor", "file_path": "a.py"})
+    assert isinstance(obj, EditorComponent)
+    assert obj.file_path == "a.py"

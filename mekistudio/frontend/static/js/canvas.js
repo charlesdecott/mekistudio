@@ -16,6 +16,7 @@ document.addEventListener('alpine:init', () => {
     settingsError: '',
     settingsNode: null,
     _settingsTree: null,
+    _editor: null,           // état du node éditeur (un seul, piloté par l'explorateur)
     panning: false,
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
@@ -53,7 +54,7 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.resizable = node.resizable !== false;
       wrap.dataset.configurable = node.configurable === true;
       this.applyBox(wrap, node);
-      wrap.appendChild(this.renderComponent(node.root));
+      wrap.appendChild(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
       wrap.addEventListener('mousedown', (e) => this.onNodeMouseDown(e, node, wrap));
       return wrap;
@@ -215,19 +216,129 @@ document.addEventListener('alpine:init', () => {
       }
       if (this._settingsTree) this._settingsTree.excludes = [...this.settingsExcludes];
       this.settingsOpen = false;
-      this.reloadCanvas();
+      // Re-rend UNIQUEMENT le node configuré (filetree avec les nouvelles
+      // exclusions), pas tout le canvas : n'altère pas le node éditeur.
+      this.rerenderNode(node);
     },
-    async reloadCanvas() {
-      let state = {};
-      try { const r = await fetch('/api/canvas'); if (r.ok) state = await r.json(); } catch (e) {}
-      this.renderNodes(state.nodes || []);
-      // ré-applique la sélection (sinon l'engrenage du node configuré disparaît)
-      if (this.selectedId) {
-        const w = this.$root.querySelector('.node-wrap[data-id="' + this.selectedId + '"]');
-        if (w) w.classList.add('selected');
+    // Re-rend un seul node en place : évite de re-monter l'EditorView (fuite)
+    // et d'écraser une édition non sauvegardée lors d'un changement de réglages.
+    // Le wrap garde sa classe .selected (donc l'engrenage reste visible).
+    rerenderNode(node) {
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + node.id + '"]');
+      if (!wrap) return;
+      wrap.replaceChildren(this.renderComponent(node.root, node));
+      if (node.configurable) wrap.appendChild(this.makeGear(node));
+    },
+
+    // --- node éditeur (CodeMirror via window.MekiEditor) ---
+    mountEditor(host, comp, node) {
+      const bar = document.createElement('div');
+      bar.className = 'editor-bar';
+      const name = document.createElement('span');
+      name.className = 'editor-name';
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'editor-save';
+      save.textContent = 'Enregistrer';
+      save.addEventListener('mousedown', (e) => e.stopPropagation());
+      save.addEventListener('click', (e) => { e.stopPropagation(); this.saveEditor(); });
+      bar.append(name, save);
+      const cmHost = document.createElement('div');
+      cmHost.className = 'editor-cm';
+      host.append(bar, cmHost);
+
+      const state = {
+        nodeId: node ? node.id : null, comp, path: comp.file_path || '',
+        handle: null, nameEl: name, saveBtn: save, dirty: false, pending: null,
+      };
+      save.disabled = !state.path;   // rien à sauver tant qu'aucun fichier ouvert
+      // NOTE : _editor est un slot UNIQUE (un seul node éditeur par canvas
+      // aujourd'hui). À indexer par node id si on autorise plusieurs éditeurs.
+      this._editor = state;
+
+      const boot = () => this._bootEditor(cmHost, state);
+      if (window.MekiEditor) { boot(); return; }
+      window.addEventListener('meki-editor-ready', boot, { once: true });
+      // Fallback : si CodeMirror (esm.sh) ne charge pas (hors-ligne, CDN down),
+      // afficher un message plutôt qu'un éditeur muet.
+      setTimeout(() => {
+        if (!state.handle) {
+          cmHost.classList.add('editor-unavailable');
+          cmHost.textContent = "Éditeur indisponible — CodeMirror n'a pas pu charger (hors-ligne ?).";
+        }
+      }, 8000);
+    },
+    async _bootEditor(cmHost, state) {
+      state.nameEl.textContent = state.path || '(aucun fichier)';
+      let content = '';
+      if (state.path) {
+        try {
+          const r = await fetch('/api/file?path=' + encodeURIComponent(state.path));
+          if (r.ok) content = (await r.json()).content || '';
+        } catch (e) { /* éditeur vide */ }
       }
+      state.handle = window.MekiEditor.mount(cmHost, {
+        path: state.path,
+        doc: content,
+        onSave: () => this.saveEditor(),
+        onChange: () => this.setDirty(true),
+      });
+      // Un fichier ouvert pendant le chargement du CM ? on applique le contenu
+      // mémorisé (sinon doc affiché et fichier persisté pourraient diverger).
+      if (state.pending) {
+        state.path = state.pending.path;
+        state.handle.setDoc(state.pending.content, state.pending.path);
+        state.pending = null;
+      }
+      state.saveBtn.disabled = !state.path;
+      this.setDirty(false);
     },
-    renderComponent(c) {
+    setDirty(d) {
+      const s = this._editor;
+      if (!s) return;
+      // pas de fichier ouvert -> rien à sauver (pas d'indicateur trompeur)
+      if (!s.path) { s.dirty = false; s.saveBtn.textContent = 'Enregistrer'; return; }
+      s.dirty = d;
+      s.saveBtn.textContent = d ? 'Enregistrer •' : 'Enregistrer';
+    },
+    async saveEditor() {
+      const s = this._editor;
+      if (!s || !s.handle || !s.path) return;
+      try {
+        const r = await fetch('/api/file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: s.path, content: s.handle.getContent() }),
+        });
+        if (r.ok) this.setDirty(false);
+      } catch (e) { /* best-effort */ }
+    },
+    async openInEditor(path) {
+      const s = this._editor;
+      if (!s) return; // pas de node éditeur sur le canvas
+      s.path = path;
+      s.comp.file_path = path;
+      s.nameEl.textContent = path;
+      // persiste le fichier ouvert (rouvre au reload)
+      if (s.nodeId) {
+        try {
+          await fetch('/api/canvas/nodes/' + s.nodeId + '/open', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+          });
+        } catch (e) { /* best-effort */ }
+      }
+      s.saveBtn.disabled = false;
+      let content = '';
+      try {
+        const r = await fetch('/api/file?path=' + encodeURIComponent(path));
+        if (r.ok) content = (await r.json()).content || '';
+      } catch (e) { /* ignore */ }
+      if (s.handle) { s.handle.setDoc(content, path); this.setDirty(false); }
+      else { s.pending = { path, content }; }  // CM pas prêt -> appliqué au boot
+    },
+    renderComponent(c, node) {
       if (!c || !c.type) return document.createComment('vide');
       if (c.type === 'header') {
         const lvl = Math.min(4, Math.max(1, c.level || 1));
@@ -240,13 +351,13 @@ document.addEventListener('alpine:init', () => {
         const el = document.createElement('div');
         el.className = 'cmp-layout dir-' + (c.direction || 'column');
         el.style.gap = (c.gap ?? 8) + 'px';
-        (c.children || []).forEach((ch) => el.appendChild(this.renderComponent(ch)));
+        (c.children || []).forEach((ch) => el.appendChild(this.renderComponent(ch, node)));
         return el;
       }
       if (c.type === 'node') {
         const el = document.createElement('div');
         el.className = 'cmp-node';
-        (c.children || []).forEach((ch) => el.appendChild(this.renderComponent(ch)));
+        (c.children || []).forEach((ch) => el.appendChild(this.renderComponent(ch, node)));
         return el;
       }
       if (c.type === 'filetree') {
@@ -258,6 +369,14 @@ document.addEventListener('alpine:init', () => {
         // Container synchrone ; le contenu est chargé en async (fire-and-forget,
         // fsExpand affiche lui-même une ligne d'erreur si le fetch échoue).
         this.fsExpand(el, c.root_path || '', 0, c.excludes || []);
+        return el;
+      }
+      if (c.type === 'editor') {
+        const el = document.createElement('div');
+        el.className = 'cmp-editor';
+        // molette -> scroll de l'éditeur (pas zoom canvas).
+        el.addEventListener('wheel', (ev) => ev.stopPropagation());
+        this.mountEditor(el, c, node);
         return el;
       }
       // type inconnu : fallback visuel plutôt qu'un trou silencieux
@@ -342,6 +461,7 @@ document.addEventListener('alpine:init', () => {
           this.$root.querySelectorAll('.fs-row.selected')
             .forEach((n) => n.classList.remove('selected'));
           row.classList.add('selected');
+          this.openInEditor(entry.path); // clic fichier -> ouvre dans l'éditeur
         });
       }
       return item;

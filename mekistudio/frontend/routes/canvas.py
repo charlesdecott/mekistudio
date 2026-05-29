@@ -10,8 +10,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from mekistudio.backend import bootstrap
-from mekistudio.backend.components import FileTreeComponent, iter_components
+from mekistudio.backend import bootstrap, fs
+from mekistudio.backend.components import (
+    EditorComponent,
+    FileTreeComponent,
+    iter_components,
+)
 from mekistudio.backend.models import Viewport
 
 router = APIRouter()
@@ -44,6 +48,12 @@ class NodeSettings(BaseModel):
     Borné (≤200) pour ne pas gonfler canvas.json ni la query line de /api/fs."""
 
     excludes: list[_ExcludeName] | None = Field(default=None, max_length=200)
+
+
+class NodeOpen(BaseModel):
+    """Ouvre un fichier dans un node éditeur (chemin relatif au repo)."""
+
+    path: Annotated[str, Field(max_length=4096)]
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -130,6 +140,30 @@ async def update_node(request: Request, node_id: str, upd: NodeUpdate) -> dict:
         if upd.h is not None:
             node.h = _clamp(upd.h, MIN_H, node.max_h)
 
+        bootstrap.save_canvas(root, state)
+        return node.model_dump(mode="json")
+
+
+@router.post("/api/canvas/nodes/{node_id}/open")
+async def open_in_editor(request: Request, node_id: str, body: NodeOpen) -> dict:
+    """Ouvre un fichier dans le node éditeur : valide le chemin (fichier du repo)
+    puis fixe file_path sur son EditorComponent. Persiste."""
+    root = request.app.state.repo_root
+    if not fs.is_file_in_root(root, body.path):
+        raise HTTPException(status_code=422, detail="chemin invalide (pas un fichier du repo)")
+    bootstrap.ensure_meki_dir(root)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        node = next((n for n in state.nodes if n.id == node_id), None)
+        if node is None:
+            raise HTTPException(status_code=404, detail="node introuvable")
+        editor = next(
+            (c for c in iter_components(node.root) if isinstance(c, EditorComponent)),
+            None,
+        )
+        if editor is None:
+            raise HTTPException(status_code=422, detail="node sans éditeur")
+        editor.file_path = body.path
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
 
