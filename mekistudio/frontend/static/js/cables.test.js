@@ -78,3 +78,10 @@ test('pointsToPath: M..L.. uniquement, segments = points-1', () => {
   assert.equal((d.match(/L/g) || []).length, 2);
   assert.ok(!/[CQA]/.test(d), 'pas de courbe');
 });
+
+test('cableClass: paires connues + fallback neutre', () => {
+  assert.equal(C.cableClass('fileexplorer', 'kernel'), 'k2e');
+  assert.equal(C.cableClass('fileeditor', 'fileexplorer'), 'e2e');
+  assert.equal(C.cableClass('chat', 'fileeditor'), 'cable-default');     // futur, non mappé
+  assert.equal(C.cableClass('fileeditor', ''), 'cable-default');          // parent introuvable
+});
