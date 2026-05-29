@@ -85,3 +85,90 @@ test('cableClass: paires connues + fallback neutre', () => {
   assert.equal(C.cableClass('chat', 'fileeditor'), 'cable-default');     // futur, non mappé
   assert.equal(C.cableClass('fileeditor', ''), 'cable-default');          // parent introuvable
 });
+
+// --- Raffinements routage : contournement d'obstacles + anti-superposition ---
+
+test('segHitsBox: traverse vs dehors', () => {
+  const O = { x: 200, y: 90, w: 40, h: 40 };
+  assert.equal(C.segHitsBox({ x: 100, y: 100 }, { x: 400, y: 100 }, O), true);  // traverse
+  assert.equal(C.segHitsBox({ x: 100, y: 100 }, { x: 150, y: 100 }, O), false); // s'arrête avant
+  assert.equal(C.segHitsBox({ x: 100, y: 50 }, { x: 400, y: 50 }, O), false);   // passe au-dessus
+});
+
+test('routeAround: sans obstacle -> tracé direct inchangé', () => {
+  const aA = { x: 100, y: 100 }, aB = { x: 400, y: 100 };
+  assert.deepEqual(C.routeAround(aA, 'right', aB, 'left', []),
+                   C.subwayPoints(aA, 'right', aB, 'left'));
+});
+
+test('routeAround: contourne un node sur la trajectoire (dégagé + 45°)', () => {
+  const aA = { x: 100, y: 100 }, aB = { x: 400, y: 100 };
+  const O = { x: 200, y: 90, w: 40, h: 40 };
+  assert.equal(C.pathHits(C.subwayPoints(aA, 'right', aB, 'left'), [O]), true); // direct traverse
+  const pts = C.routeAround(aA, 'right', aB, 'left', [O]);
+  assert.equal(C.pathHits(pts, [O]), false);                                    // contournement dégage
+  for (let i = 1; i < pts.length; i++) {                                        // segments H/V/45° seulement
+    const dx = Math.abs(pts[i].x - pts[i - 1].x), dy = Math.abs(pts[i].y - pts[i - 1].y);
+    assert.ok(dx < 1e-6 || dy < 1e-6 || Math.abs(dx - dy) < 1e-6, `segment ${i} non H/V/45`);
+  }
+});
+
+test('routeAround: cas vertical (node au-dessus du parent) contourne aussi', () => {
+  const aA = { x: 100, y: 100 }, aB = { x: 100, y: 400 };
+  const O = { x: 90, y: 200, w: 40, h: 40 };
+  const pts = C.routeAround(aA, 'bottom', aB, 'top', [O]);
+  assert.equal(C.pathHits(pts, [O]), false);
+});
+
+test('diagOf: extrait la diagonale', () => {
+  assert.deepEqual(C.diagOf([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 30, y: 20 }, { x: 50, y: 20 }]),
+                   [{ x: 10, y: 0 }, { x: 30, y: 20 }]);
+  assert.equal(C.diagOf([{ x: 0, y: 0 }, { x: 10, y: 0 }]), null);
+});
+
+test('diagsOverlap: collinéaire vs parallèle-loin vs pente opposée', () => {
+  const d1 = [{ x: 0, y: 0 }, { x: 50, y: 50 }];
+  assert.equal(C.diagsOverlap(d1, [{ x: 10, y: 8 }, { x: 60, y: 58 }], 4), true);   // ~même droite, chevauche
+  assert.equal(C.diagsOverlap(d1, [{ x: 0, y: 100 }, { x: 50, y: 150 }], 4), false);// parallèle, loin
+  assert.equal(C.diagsOverlap(d1, [{ x: 0, y: 50 }, { x: 50, y: 0 }], 4), false);   // pente opposée
+});
+
+test('bboxesOverlap', () => {
+  assert.equal(C.bboxesOverlap({ x: 0, y: 0, w: 10, h: 10 }, { x: 5, y: 5, w: 10, h: 10 }), true);
+  assert.equal(C.bboxesOverlap({ x: 0, y: 0, w: 10, h: 10 }, { x: 50, y: 50, w: 10, h: 10 }), false);
+});
+
+// --- routeAvoiding : pur 45° + changement de face de la node la plus proche ---
+
+function all45(pts) { // segments uniquement H / V / 45°
+  for (let i = 1; i < pts.length; i++) {
+    const dx = Math.abs(pts[i].x - pts[i - 1].x), dy = Math.abs(pts[i].y - pts[i - 1].y);
+    if (!(dx < 1e-6 || dy < 1e-6 || Math.abs(dx - dy) < 1e-6)) return false;
+  }
+  return true;
+}
+
+test('routeAvoiding: sans obstacle -> faces naturelles, tracé direct', () => {
+  const src = { x: 0, y: 0, w: 100, h: 100 }, tgt = { x: 400, y: 0, w: 100, h: 100 };
+  const r = C.routeAvoiding(src, 'right', tgt, 'left', []);
+  assert.equal(r.hit, false);
+  assert.equal(r.srcSide, 'right'); assert.equal(r.tgtSide, 'left');
+});
+
+test('routeAvoiding: obstacle dense -> ne passe PAS sous le node (45° strict)', () => {
+  const src = { x: 300, y: 0, w: 300, h: 380 };   // explorer
+  const tgt = { x: 1400, y: 0, w: 520, h: 440 };  // editor2 lointain
+  const O = { x: 700 - 18, y: -40 - 18, w: 520 + 36, h: 440 + 36 }; // editor1 gonflé, au milieu
+  const r = C.routeAvoiding(src, 'right', tgt, 'left', [O]);
+  assert.equal(C.pathHits(r.pts, [O]), false);
+  assert.ok(all45(r.pts));
+});
+
+test('routeAvoiding: obstacle collé à la source -> change la face de sortie', () => {
+  const src = { x: 300, y: 200, w: 150, h: 120 }, tgt = { x: 1000, y: 210, w: 150, h: 110 };
+  const O = { x: 452, y: 130, w: 220, h: 260 };   // collé au bord droit de src (src.right = 450)
+  const r = C.routeAvoiding(src, 'right', tgt, 'left', [O]);
+  assert.equal(C.pathHits(r.pts, [O]), false);
+  assert.notEqual(r.srcSide, 'right');            // a dû changer de face source
+  assert.ok(all45(r.pts));
+});
