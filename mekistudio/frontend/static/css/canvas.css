@@ -206,3 +206,15 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .fs-error { color: #e0a070; cursor: default; }
 .fs-error:hover { background: none; }
 /* (scrollbar discrète : voir la règle globale en tête de fichier) */
+
+/* --- Câbles (layer SVG dans .world, sous tous les node-wrap) --- */
+.cables {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  overflow: visible; pointer-events: none;
+  z-index: -1; /* derrière les node-wrap, y compris leurs z-index résiduels (selectNode) */
+}
+.cable .cable-halo { fill: none; stroke-width: 7; opacity: .22; stroke-linecap: round; stroke-linejoin: round; }
+.cable .cable-core { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.cable.k2e .cable-halo, .cable.k2e .cable-core { stroke: #b388ff; }
+.cable.e2e .cable-halo, .cable.e2e .cable-core { stroke: #45d6c2; }
+.cable.cable-default .cable-halo, .cable.cable-default .cable-core { stroke: #8893a7; }
