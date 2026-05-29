@@ -396,9 +396,16 @@ par l'utilisateur). Géométrie **pure** dans `cables.js` (testée `node --test`
   câble droit) seulement si **aucune face** ne dégage — ce qui n'arrive que si un node
   **chevauche** une extrémité (cf. dépendance ci-dessous).
 
-- **D16 — Anti-superposition des CÂBLES : DIFFÉRÉE.** Les fonctions pures restent dans
-  `cables.js` (`diagOf`/`diagsOverlap`/`segBBox`/`bboxesOverlap`, testées) mais **ne sont pas
-  branchées** (la passe de bump écrasait le changement de face). À reprendre plus tard.
+- **D16 — Anti-superposition des CÂBLES (ruban) : IMPLÉMENTÉE.** Deux câbles **parallèles**
+  trop proches (distance perpendiculaire < `RIBBON_GAP` = 20 px) dont les **projections se
+  recouvrent** se « confondent » → on les écarte en **ruban**. `segOverlap`/`cablesOverlap`
+  (pures, testées) détectent (un **croisement** pentes ≠ est toléré). `drawCablesFrom` garde
+  pour chaque câble sa **face + offset** (`face[]`/`off[]`) et un `reroute(i)` ; passe 4c :
+  pré-filtre **bbox**, puis pour une paire confondue, **décale LE CÂBLE** (offset `+RIBBON_GAP`,
+  jamais le node) et le **re-route SUR SA FACE** (correctif clé vs l'ancien bump qui revenait à
+  la face adaptative) ; **borné** (3 passes). *Limite assumée : si une face de node est
+  sur-encombrée de câbles, le clamp de `sideAnchor` peut laisser un résidu (cas-bord lié à
+  l'encombrement / D17).*
 
 - **D17 — Dépendance à l'anti-chevauchement des nodes** : le contournement est limité par un
   fait géométrique — **on ne peut pas faire sortir un câble d'une node pour éviter un obstacle
@@ -408,7 +415,8 @@ par l'utilisateur). Géométrie **pure** dans `cables.js` (testée `node --test`
   [`2026-05-29-canvas-node-collision-design.md`](2026-05-29-canvas-node-collision-design.md)
   (anti-chevauchement & collision douce), à implémenter ensuite.
 
-Validé honnêtement (Playwright) : sur disposition **dense réelle** sans chevauchement de
-nodes → **0 câble sous un node**, contournement appliqué (câble à 7 segments, face changée),
-0 erreur console ; `node --test` **17/17**. Le seul résidu observé venait de **deux éditeurs
-qui se chevauchaient** (→ D17).
+Validé honnêtement (Playwright) : (a) contournement — dense réelle sans chevauchement de nodes
+→ **0 câble sous un node** (câble à 7 segments, face changée) ; (b) ruban — éditeurs en
+**cascade serrée** → **aucune paire de câbles plus proche que `RIBBON_GAP`** (mesuré en page
+via `MekiCables.cablesOverlap`). `node --test` **19/19**, 0 erreur console. Résidus connus :
+deux éditeurs **qui se chevauchent** (→ D17) ; face de node **sur-encombrée** (clamp).
