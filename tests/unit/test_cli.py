@@ -27,34 +27,50 @@ class _FakeProc:
         self.returncode = returncode
 
 
-def test_update_rebuilds_global_tool(tmp_path, monkeypatch):
-    calls = []
+def _install_was_issued(run_calls, popen_calls, repo):
+    """L'install global est émise via subprocess.run (POSIX, synchrone) OU
+    subprocess.Popen (Windows, process détaché). Vrai dans les deux cas."""
+    for cmd in run_calls:
+        if cmd[:4] == ["uv", "tool", "install", "--force"] and cmd[4] == str(repo):
+            return True
+    for cmd in popen_calls:
+        joined = " ".join(cmd)
+        if "uv tool install --force" in joined and str(repo) in joined:
+            return True
+    return False
 
-    def fake_run(cmd, *a, **k):
-        calls.append(cmd)
-        return _FakeProc(0)
 
-    monkeypatch.setattr("mekistudio.cli.subprocess.run", fake_run)
+def test_update_reinstalls_global_tool(tmp_path, monkeypatch):
+    run_calls, popen_calls = [], []
+    monkeypatch.setattr(
+        "mekistudio.cli.subprocess.run",
+        lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
+    )
+    monkeypatch.setattr(
+        "mekistudio.cli.subprocess.Popen", lambda cmd, *a, **k: popen_calls.append(cmd)
+    )
 
     result = CliRunner().invoke(app, ["update", "--repo", str(tmp_path), "--no-pull"])
 
     assert result.exit_code == 0, result.output
-    # Sans --pull, on ne touche pas à git ; on reconstruit l'outil global.
-    assert calls == [["uv", "tool", "install", "--force", str(tmp_path)]]
+    # Sans --pull : pas de git, mais l'outil global est bien reconstruit.
+    assert not any(c[:1] == ["git"] for c in run_calls)
+    assert _install_was_issued(run_calls, popen_calls, tmp_path)
 
 
-def test_update_pulls_then_rebuilds(tmp_path, monkeypatch):
+def test_update_pulls_then_reinstalls(tmp_path, monkeypatch):
     (tmp_path / ".git").mkdir()
-    calls = []
-
-    def fake_run(cmd, *a, **k):
-        calls.append(cmd)
-        return _FakeProc(0)
-
-    monkeypatch.setattr("mekistudio.cli.subprocess.run", fake_run)
+    run_calls, popen_calls = [], []
+    monkeypatch.setattr(
+        "mekistudio.cli.subprocess.run",
+        lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
+    )
+    monkeypatch.setattr(
+        "mekistudio.cli.subprocess.Popen", lambda cmd, *a, **k: popen_calls.append(cmd)
+    )
 
     result = CliRunner().invoke(app, ["update", "--repo", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert calls[0] == ["git", "-C", str(tmp_path), "pull", "--ff-only"]
-    assert calls[1] == ["uv", "tool", "install", "--force", str(tmp_path)]
+    assert run_calls[0] == ["git", "-C", str(tmp_path), "pull", "--ff-only"]
+    assert _install_was_issued(run_calls, popen_calls, tmp_path)
