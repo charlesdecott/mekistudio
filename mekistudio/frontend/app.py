@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from packages.frontend.routes import canvas
+from mekistudio.frontend.routes import canvas
 
 
 def create_app(repo_root: Path | None = None) -> FastAPI:

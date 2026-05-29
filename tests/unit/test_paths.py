@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from packages.backend import paths
+from mekistudio.backend import paths
 
 
 def test_find_repo_root_walks_up_to_git(tmp_path):

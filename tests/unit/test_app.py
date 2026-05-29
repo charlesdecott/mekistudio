@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from packages.backend import paths
-from packages.frontend.app import create_app
+from mekistudio.backend import paths
+from mekistudio.frontend.app import create_app
 
 
 def _client(tmp_path):

@@ -4,8 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from packages.backend import paths
-from packages.backend.models import CanvasState, Manifest
+from mekistudio.backend import paths
+from mekistudio.backend.models import CanvasState, Manifest
 
 log = logging.getLogger(__name__)
 

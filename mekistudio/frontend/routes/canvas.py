@@ -6,8 +6,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from packages.backend import bootstrap
-from packages.backend.models import Viewport
+from mekistudio.backend import bootstrap
+from mekistudio.backend.models import Viewport
 
 router = APIRouter()
 
