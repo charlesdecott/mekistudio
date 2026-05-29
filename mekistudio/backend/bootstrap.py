@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mekistudio.backend import paths
 from mekistudio.backend.models import CanvasState, Manifest
-from mekistudio.backend.nodes import default_canvas, reconcile_constraints
+from mekistudio.backend.nodes import default_canvas, reconcile_constraints, reconcile_source_links
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ def _ensure_builtin_nodes(root: Path) -> None:
     missing = [n for n in default_canvas().nodes if n.kind not in have]
     if missing or not paths.canvas_path(root).exists():
         state.nodes.extend(missing)
+        reconcile_source_links(state)  # relie les built-in fraîchement réinjectés
         save_canvas(root, state)
 
 
@@ -64,7 +65,7 @@ def load_canvas(root: Path) -> CanvasState:
     # Les contraintes (movable/resizable/max_*) sont intrinsèques au kind : on
     # les réimpose depuis la fabrique (un vieux canvas.json ne doit pas pouvoir
     # rendre le kernel déplaçable via des défauts permissifs).
-    return reconcile_constraints(state)
+    return reconcile_source_links(reconcile_constraints(state))
 
 
 def save_canvas(root: Path, state: CanvasState) -> None:

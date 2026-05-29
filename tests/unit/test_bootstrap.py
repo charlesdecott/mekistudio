@@ -92,3 +92,23 @@ def test_save_then_load_canvas(tmp_path):
     assert loaded.viewport == Viewport(x=3, y=4, zoom=1.5)
     on_disk = json.loads(paths.canvas_path(tmp_path).read_text(encoding="utf-8"))
     assert on_disk["viewport"]["x"] == 3
+
+
+def test_ensure_builtin_relinks_when_kernel_missing(tmp_path):
+    # canvas hérité : explorateur SANS kernel et source_id pointant un id mort.
+    import json
+    from mekistudio.backend import paths
+    from mekistudio.backend.bootstrap import ensure_meki_dir, load_canvas
+    from mekistudio.backend.nodes import build_file_explorer_node
+
+    paths.meki_dir(tmp_path).mkdir(parents=True, exist_ok=True)
+    e = build_file_explorer_node()
+    e.source_id = "dead-kernel-id"
+    legacy = {"schema_version": 1, "nodes": [e.model_dump(mode="json")], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
+    paths.canvas_path(tmp_path).write_text(json.dumps(legacy), encoding="utf-8")
+
+    ensure_meki_dir(tmp_path)  # doit réinjecter le kernel ET relier l'explorateur
+    state = load_canvas(tmp_path)
+    k = next(n for n in state.nodes if n.kind == "kernel")
+    exp = next(n for n in state.nodes if n.kind == "fileexplorer")
+    assert exp.source_id == k.id  # relié au VRAI kernel présent, pas l'id mort
