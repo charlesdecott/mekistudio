@@ -16,7 +16,9 @@ document.addEventListener('alpine:init', () => {
     settingsError: '',
     settingsNode: null,
     _settingsTree: null,
-    _editor: null,           // état du node éditeur (un seul, piloté par l'explorateur)
+    _editors: {},            // états des nodes éditeur, indexés par node id
+    _zTop: 0,                // dernier z-index attribué (premier plan au clic)
+    _editorSpawns: 0,        // éditeurs en cours de spawn (réserve la position en cascade)
     panning: false,
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
@@ -123,6 +125,11 @@ document.addEventListener('alpine:init', () => {
       this.$root.querySelectorAll('.node-wrap.selected').forEach((n) => n.classList.remove('selected'));
       wrap.classList.add('selected');
       this.selectedId = wrap.dataset.id;
+      // passe au premier plan (utile quand des nodes se chevauchent, ex. éditeurs
+      // en cascade : sinon le bouton fermer d'un node masqué est inaccessible).
+      // z-index scopé au stacking context de .world (transform) -> jamais au-dessus
+      // de la toolbar/HUD/modale.
+      wrap.style.zIndex = ++this._zTop;
     },
     async persistNode(node) {
       try {
@@ -230,7 +237,9 @@ document.addEventListener('alpine:init', () => {
       if (node.configurable) wrap.appendChild(this.makeGear(node));
     },
 
-    // --- node éditeur (CodeMirror via window.MekiEditor) ---
+    // --- nodes éditeur (CodeMirror via window.MekiEditor) ---
+    // Plusieurs éditeurs possibles -> chaque state est autonome (closures) et
+    // indexé par node id dans this._editors. Pas de slot global.
     mountEditor(host, comp, node) {
       const bar = document.createElement('div');
       bar.className = 'editor-bar';
@@ -240,9 +249,13 @@ document.addEventListener('alpine:init', () => {
       save.type = 'button';
       save.className = 'editor-save';
       save.textContent = 'Enregistrer';
-      save.addEventListener('mousedown', (e) => e.stopPropagation());
-      save.addEventListener('click', (e) => { e.stopPropagation(); this.saveEditor(); });
-      bar.append(name, save);
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'editor-close';
+      close.title = 'Fermer';
+      close.textContent = '✕';
+      [save, close].forEach((b) => b.addEventListener('mousedown', (e) => e.stopPropagation()));
+      bar.append(name, save, close);
       const cmHost = document.createElement('div');
       cmHost.className = 'editor-cm';
       host.append(bar, cmHost);
@@ -252,9 +265,9 @@ document.addEventListener('alpine:init', () => {
         handle: null, nameEl: name, saveBtn: save, dirty: false, pending: null,
       };
       save.disabled = !state.path;   // rien à sauver tant qu'aucun fichier ouvert
-      // NOTE : _editor est un slot UNIQUE (un seul node éditeur par canvas
-      // aujourd'hui). À indexer par node id si on autorise plusieurs éditeurs.
-      this._editor = state;
+      save.addEventListener('click', (e) => { e.stopPropagation(); this.saveEditor(state); });
+      close.addEventListener('click', (e) => { e.stopPropagation(); this.closeEditor(state); });
+      if (state.nodeId) this._editors[state.nodeId] = state;
 
       const boot = () => this._bootEditor(cmHost, state);
       if (window.MekiEditor) { boot(); return; }
@@ -280,10 +293,10 @@ document.addEventListener('alpine:init', () => {
       state.handle = window.MekiEditor.mount(cmHost, {
         path: state.path,
         doc: content,
-        onSave: () => this.saveEditor(),
-        onChange: () => this.setDirty(true),
+        onSave: () => this.saveEditor(state),
+        onChange: () => this.setDirty(state, true),
       });
-      // Un fichier ouvert pendant le chargement du CM ? on applique le contenu
+      // Fichier ouvert pendant le chargement du CM ? on applique le contenu
       // mémorisé (sinon doc affiché et fichier persisté pourraient diverger).
       if (state.pending) {
         state.path = state.pending.path;
@@ -291,52 +304,99 @@ document.addEventListener('alpine:init', () => {
         state.pending = null;
       }
       state.saveBtn.disabled = !state.path;
-      this.setDirty(false);
+      this.setDirty(state, false);
     },
-    setDirty(d) {
-      const s = this._editor;
-      if (!s) return;
+    setDirty(state, d) {
+      if (!state) return;
       // pas de fichier ouvert -> rien à sauver (pas d'indicateur trompeur)
-      if (!s.path) { s.dirty = false; s.saveBtn.textContent = 'Enregistrer'; return; }
-      s.dirty = d;
-      s.saveBtn.textContent = d ? 'Enregistrer •' : 'Enregistrer';
+      if (!state.path) { state.dirty = false; state.saveBtn.textContent = 'Enregistrer'; return; }
+      state.dirty = d;
+      state.saveBtn.textContent = d ? 'Enregistrer •' : 'Enregistrer';
     },
-    async saveEditor() {
-      const s = this._editor;
-      if (!s || !s.handle || !s.path) return;
+    async saveEditor(state) {
+      if (!state || !state.handle || !state.path) return;
       try {
         const r = await fetch('/api/file', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: s.path, content: s.handle.getContent() }),
+          body: JSON.stringify({ path: state.path, content: state.handle.getContent() }),
         });
-        if (r.ok) this.setDirty(false);
+        if (r.ok) this.setDirty(state, false);
       } catch (e) { /* best-effort */ }
     },
-    async openInEditor(path) {
-      const s = this._editor;
-      if (!s) return; // pas de node éditeur sur le canvas
-      s.path = path;
-      s.comp.file_path = path;
-      s.nameEl.textContent = path;
-      // persiste le fichier ouvert (rouvre au reload)
-      if (s.nodeId) {
+    async closeEditor(state) {
+      if (!state) return;
+      // warning si modifications non enregistrées
+      if (state.dirty && !window.confirm(
+        '« ' + (state.path || 'fichier') + " » a des modifications non enregistrées.\n"
+        + 'Fermer sans sauvegarder ?')) return;
+      // ne retirer du DOM que si le node est bien supprimé côté serveur (sinon
+      // il réapparaîtrait au reload). 404 = déjà absent -> on peut retirer.
+      if (state.nodeId) {
+        let ok = false;
         try {
-          await fetch('/api/canvas/nodes/' + s.nodeId + '/open', {
+          const r = await fetch('/api/canvas/nodes/' + state.nodeId, { method: 'DELETE' });
+          ok = r.ok || r.status === 404;
+        } catch (e) { ok = false; }
+        if (!ok) { window.alert('Échec de la fermeture (serveur injoignable) — réessaie.'); return; }
+        delete this._editors[state.nodeId];
+      }
+      if (state.handle) state.handle.destroy();   // libère l'EditorView
+      const wrap = state.nodeId
+        && this.$root.querySelector('.node-wrap[data-id="' + state.nodeId + '"]');
+      if (wrap) wrap.remove();
+    },
+    // Double-clic sur un fichier -> spawn un NOUVEAU node éditeur près de
+    // l'explorateur (en cascade), ouvre le fichier dedans, le rend.
+    async openFileInNewEditor(path) {
+      // réserve une position de cascade SYNCHRONEMENT (avant les await) : deux
+      // double-clics rapprochés donnent des positions distinctes.
+      const slot = this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]').length
+        + this._editorSpawns;
+      this._editorSpawns++;
+      try {
+        const pos = this.editorPosAt(slot);
+        let node;
+        try {
+          const r = await fetch('/api/canvas/nodes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y }),
+          });
+          if (!r.ok) return;
+          node = await r.json();
+        } catch (e) { return; }
+        // ouvre le fichier ; si ça échoue, on ANNULE la création (pas d'éditeur
+        // fantôme vide persisté).
+        let opened = false;
+        try {
+          const r2 = await fetch('/api/canvas/nodes/' + node.id + '/open', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path }),
           });
-        } catch (e) { /* best-effort */ }
+          if (r2.ok) { node = await r2.json(); opened = true; }
+        } catch (e) { /* échec -> annulation ci-dessous */ }
+        if (!opened) {
+          try { await fetch('/api/canvas/nodes/' + node.id, { method: 'DELETE' }); } catch (e) {}
+          return;
+        }
+        const world = this.$root.querySelector('.world');
+        if (world) world.appendChild(this.renderNode(node));
+      } finally {
+        this._editorSpawns--;
       }
-      s.saveBtn.disabled = false;
-      let content = '';
-      try {
-        const r = await fetch('/api/file?path=' + encodeURIComponent(path));
-        if (r.ok) content = (await r.json()).content || '';
-      } catch (e) { /* ignore */ }
-      if (s.handle) { s.handle.setDoc(content, path); this.setDirty(false); }
-      else { s.pending = { path, content }; }  // CM pas prêt -> appliqué au boot
+    },
+    editorPosAt(slot) {
+      // à droite de l'explorateur, décalé en cascade selon le slot réservé.
+      const ex = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      let bx = 360, by = 0, bw = 300;
+      if (ex) {
+        bx = parseFloat(ex.style.left) || 0;
+        by = parseFloat(ex.style.top) || 0;
+        bw = ex.offsetWidth || 300;
+      }
+      return { x: bx + bw + 40 + slot * 28, y: by + slot * 28 };
     },
     renderComponent(c, node) {
       if (!c || !c.type) return document.createComment('vide');
@@ -455,13 +515,18 @@ document.addEventListener('alpine:init', () => {
           }
         });
       } else {
+        // simple clic = sélection seule ; double-clic = ouvrir dans l'éditeur (VSCode-like)
         row.addEventListener('click', (ev) => {
           if (this.tool !== 'select') return;
           ev.stopPropagation();
           this.$root.querySelectorAll('.fs-row.selected')
             .forEach((n) => n.classList.remove('selected'));
           row.classList.add('selected');
-          this.openInEditor(entry.path); // clic fichier -> ouvre dans l'éditeur
+        });
+        row.addEventListener('dblclick', (ev) => {
+          if (this.tool !== 'select') return;
+          ev.stopPropagation();
+          this.openFileInNewEditor(entry.path);
         });
       }
       return item;

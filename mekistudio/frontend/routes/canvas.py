@@ -17,12 +17,17 @@ from mekistudio.backend.components import (
     iter_components,
 )
 from mekistudio.backend.models import Viewport
+from mekistudio.backend.nodes import NODE_BUILDERS, build_node, default_canvas
 
 router = APIRouter()
 
 # Tailles minimales d'un node (mêmes valeurs côté JS pour le clamp pendant le drag).
 MIN_W = 140.0
 MIN_H = 80.0
+# Garde-fou : nombre max de nodes (cohérent avec les autres bornes d'entrée).
+MAX_NODES = 300
+# Kinds built-in (toujours présents) : non supprimables via l'API.
+_BUILTIN_KINDS = {n.kind for n in default_canvas().nodes}
 
 # Sérialise les écritures canvas.json (load -> mutate -> save) : aujourd'hui les
 # handlers sont atomiques (event-loop unique, pas d'await au milieu), mais ce
@@ -54,6 +59,14 @@ class NodeOpen(BaseModel):
     """Ouvre un fichier dans un node éditeur (chemin relatif au repo)."""
 
     path: Annotated[str, Field(max_length=4096)]
+
+
+class NodeCreate(BaseModel):
+    """Crée un node d'un kind donné à une position."""
+
+    kind: str
+    x: float = 0.0
+    y: float = 0.0
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -142,6 +155,42 @@ async def update_node(request: Request, node_id: str, upd: NodeUpdate) -> dict:
 
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
+
+
+@router.post("/api/canvas/nodes")
+async def create_node(request: Request, body: NodeCreate) -> dict:
+    """Crée un node (ex. un éditeur spawné au double-clic) et le persiste."""
+    if body.kind not in NODE_BUILDERS:
+        raise HTTPException(status_code=422, detail="kind de node inconnu")
+    _reject_non_finite(body.x, body.y)
+    root = request.app.state.repo_root
+    bootstrap.ensure_meki_dir(root)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        if len(state.nodes) >= MAX_NODES:
+            raise HTTPException(status_code=422, detail="trop de nodes sur le canvas")
+        node = build_node(body.kind, x=body.x, y=body.y)
+        state.nodes.append(node)
+        bootstrap.save_canvas(root, state)
+        return node.model_dump(mode="json")
+
+
+@router.delete("/api/canvas/nodes/{node_id}")
+async def delete_node(request: Request, node_id: str) -> dict:
+    """Supprime un node (ex. fermeture d'un éditeur). Les built-in (toujours
+    présents) ne sont PAS supprimables."""
+    root = request.app.state.repo_root
+    bootstrap.ensure_meki_dir(root)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        node = next((n for n in state.nodes if n.id == node_id), None)
+        if node is None:
+            raise HTTPException(status_code=404, detail="node introuvable")
+        if node.kind in _BUILTIN_KINDS:
+            raise HTTPException(status_code=422, detail="node built-in non supprimable")
+        state.nodes = [n for n in state.nodes if n.id != node_id]
+        bootstrap.save_canvas(root, state)
+        return {"status": "ok"}
 
 
 @router.post("/api/canvas/nodes/{node_id}/open")

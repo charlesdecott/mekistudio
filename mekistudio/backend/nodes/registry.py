@@ -40,11 +40,11 @@ def reconcile_constraints(state: CanvasState) -> CanvasState:
 def default_canvas() -> CanvasState:
     """Canvas initial : les nodes built-in (kernel + explorateur de fichiers),
     pour que le canvas ne soit jamais vide."""
-    # Positions = défauts des fabriques (source unique), pas de duplication ici.
+    # Built-in (toujours présents) : kernel + explorateur. Les éditeurs sont
+    # dynamiques — spawnés au double-clic sur un fichier, fermables.
     return CanvasState(
         nodes=[
             kernel.build_kernel_node(),
             file_explorer.build_file_explorer_node(),
-            file_editor.build_file_editor_node(),
         ]
     )
