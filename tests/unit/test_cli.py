@@ -29,13 +29,14 @@ class _FakeProc:
 
 def _install_was_issued(run_calls, popen_calls, repo):
     """L'install global est émise via subprocess.run (POSIX, synchrone) OU
-    subprocess.Popen (Windows, process détaché). Vrai dans les deux cas."""
+    subprocess.Popen (Windows, process détaché). Doit forcer --reinstall pour
+    ne pas resservir un wheel en cache. Vrai dans les deux cas."""
     for cmd in run_calls:
-        if cmd[:4] == ["uv", "tool", "install", "--force"] and cmd[4] == str(repo):
+        if cmd[:5] == ["uv", "tool", "install", "--reinstall", "--force"] and cmd[5] == str(repo):
             return True
     for cmd in popen_calls:
         joined = " ".join(cmd)
-        if "uv tool install --force" in joined and str(repo) in joined:
+        if "uv tool install --reinstall --force" in joined and str(repo) in joined:
             return True
     return False
 
