@@ -23,6 +23,7 @@ document.addEventListener('alpine:init', () => {
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
     _saveTimer: null,
+    _dragBoxes: null,        // snapshot des boîtes pendant un drag (évite un reflow/frame)
 
     async init() {
       let state = {};
@@ -195,6 +196,7 @@ document.addEventListener('alpine:init', () => {
         w: node.w != null ? node.w : wrap.offsetWidth,
         h: node.h != null ? node.h : wrap.offsetHeight,
       };
+      this._dragBoxes = this.nodeBoxes(); // boîtes des AUTRES nodes figées le temps du drag
       let moved = false;
       let done = false;
       const finish = () => {
@@ -203,6 +205,8 @@ document.addEventListener('alpine:init', () => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', finish);
         if (moved) this.persistNode(node); // pas de POST sur un simple clic
+        this._dragBoxes = null;
+        this.drawCables(); // re-route final avec lecture fraîche du DOM
       };
       const onMove = (ev) => {
         if (!(ev.buttons & 1)) return finish(); // bouton relâché hors fenêtre
@@ -215,6 +219,17 @@ document.addEventListener('alpine:init', () => {
           node.h = this.clampH(node, orig.h + dy);
         }
         this.applyBox(wrap, node);
+        // re-route : seule la boîte du node manipulé change ; les autres viennent du cache.
+        if (this._dragBoxes) {
+          const m = new Map(this._dragBoxes);
+          const prev = m.get(node.id) || { kind: wrap.dataset.kind, source: wrap.dataset.source };
+          m.set(node.id, {
+            box: { x: node.x || 0, y: node.y || 0,
+                   w: node.w != null ? node.w : orig.w, h: node.h != null ? node.h : orig.h },
+            kind: prev.kind, source: prev.source,
+          });
+          this.drawCablesFrom(m);
+        }
       };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', finish);
@@ -445,6 +460,7 @@ document.addEventListener('alpine:init', () => {
       const wrap = state.nodeId
         && this.$root.querySelector('.node-wrap[data-id="' + state.nodeId + '"]');
       if (wrap) wrap.remove();
+      this.drawCables(); // le câble disparaît avec le node source retiré
     },
     // Double-clic sur un fichier -> spawn un NOUVEAU node éditeur près de
     // l'explorateur (en cascade), ouvre le fichier dedans, le rend.
@@ -483,6 +499,7 @@ document.addEventListener('alpine:init', () => {
         }
         const world = this.$root.querySelector('.world');
         if (world) world.appendChild(this.renderNode(node));
+        this.drawCables(); // câble du nouvel éditeur -> explorateur
       } finally {
         this._editorSpawns--;
       }
