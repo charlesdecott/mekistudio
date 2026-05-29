@@ -5,6 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from mekistudio.backend.components import (
     Component,
+    FileTreeComponent,
     HeaderComponent,
     LayoutComponent,
     NodeComponent,
@@ -51,3 +52,20 @@ def test_discriminated_union_parses_by_type():
     )
     assert isinstance(obj, HeaderComponent)
     assert obj.level == 3
+
+
+def test_filetree_defaults_and_in_union():
+    ft = FileTreeComponent()
+    assert ft.type == "filetree"
+    assert ft.root_path == ""
+    # parsable via l'union discriminée
+    obj = TypeAdapter(Component).validate_python({"type": "filetree", "root_path": "sub"})
+    assert isinstance(obj, FileTreeComponent)
+    assert obj.root_path == "sub"
+
+
+def test_filetree_nested_in_layout_roundtrip():
+    tree = NodeComponent(children=[LayoutComponent(children=[FileTreeComponent()])])
+    again = NodeComponent.model_validate(tree.model_dump(mode="json"))
+    assert again == tree
+    assert isinstance(again.children[0].children[0], FileTreeComponent)

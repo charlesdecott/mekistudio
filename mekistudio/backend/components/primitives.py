@@ -31,10 +31,20 @@ class NodeComponent(ComponentBase):
     children: list[Component] = Field(default_factory=list)
 
 
+class FileTreeComponent(ComponentBase):
+    """Explorateur de fichiers (style VSCode). Point de montage seulement : le
+    contenu de l'arbre n'est PAS dans l'état — le front le charge paresseusement
+    via /api/fs au fur et à mesure des dépliages (le FS change, donc pas de cache
+    dans canvas.json)."""
+
+    type: Literal["filetree"] = "filetree"
+    root_path: str = ""  # racine relative au repo (posix) ; "" = racine du repo
+
+
 # Union discriminée : le champ `type` sélectionne la classe au parsing. C'est
 # ce qui permet de (dé)sérialiser un arbre hétérogène sans perdre les types.
 Component = Annotated[
-    Union[NodeComponent, LayoutComponent, HeaderComponent],
+    Union[NodeComponent, LayoutComponent, HeaderComponent, FileTreeComponent],
     Field(discriminator="type"),
 ]
 

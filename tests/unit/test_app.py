@@ -29,11 +29,27 @@ def test_get_canvas_returns_state(tmp_path):
     r = _client(tmp_path).get("/api/canvas")
     assert r.status_code == 200
     body = r.json()
-    # Le canvas neuf est seedé avec le kernelNode (fini le canvas vide).
-    assert len(body["nodes"]) == 1
-    assert body["nodes"][0]["kind"] == "kernel"
-    assert body["nodes"][0]["root"]["type"] == "node"
+    # Le canvas neuf est seedé avec les nodes built-in (fini le canvas vide).
+    kinds = {n["kind"] for n in body["nodes"]}
+    assert kinds == {"kernel", "fileexplorer"}
+    assert all(n["root"]["type"] == "node" for n in body["nodes"])
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
+
+
+def test_fs_lists_repo_root(tmp_path):
+    (tmp_path / "hello.txt").write_text("hi", encoding="utf-8")
+    (tmp_path / "pkg").mkdir()
+    r = _client(tmp_path).get("/api/fs")
+    assert r.status_code == 200
+    entries = r.json()["entries"]
+    by_name = {e["name"]: e for e in entries}
+    assert by_name["hello.txt"]["kind"] == "file"
+    assert by_name["pkg"]["kind"] == "dir"
+
+
+def test_fs_rejects_traversal(tmp_path):
+    r = _client(tmp_path).get("/api/fs", params={"path": ".."})
+    assert r.status_code == 422
 
 
 def test_post_viewport_persists(tmp_path):
