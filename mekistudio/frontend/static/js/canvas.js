@@ -6,6 +6,8 @@
 document.addEventListener('alpine:init', () => {
   Alpine.data('canvas', () => ({
     projectName: window.__PROJECT_NAME__ || 'mekistudio',
+    tool: 'select',          // 'select' | 'move' | 'resize'
+    selectedId: null,
     panning: false,
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
@@ -17,8 +19,13 @@ document.addEventListener('alpine:init', () => {
         const r = await fetch('/api/canvas');
         if (r.ok) state = await r.json();
       } catch (e) { /* canvas vide par défaut */ }
-      if (state.viewport) this.view = state.viewport;
-      this.renderNodes(state.nodes || []);
+      const v = state.viewport;
+      const defaultView = !v || (v.x === 0 && v.y === 0 && v.zoom === 1);
+      if (v) this.view = v;
+      const nodes = state.nodes || [];
+      this.renderNodes(nodes);
+      // Au tout premier affichage (vue par défaut), on centre sur le kernel.
+      if (defaultView) this.centerOnKernel(nodes);
     },
 
     // Rendu des nodes en DOM direct : Alpine gère le pan/zoom du canvas, le
@@ -32,11 +39,99 @@ document.addEventListener('alpine:init', () => {
     renderNode(node) {
       const wrap = document.createElement('div');
       wrap.className = 'node-wrap';
+      wrap.dataset.id = node.id;
+      wrap.dataset.kind = node.kind || '';
+      wrap.dataset.movable = node.movable !== false;
+      wrap.dataset.resizable = node.resizable !== false;
+      this.applyBox(wrap, node);
+      wrap.appendChild(this.renderComponent(node.root));
+      wrap.addEventListener('mousedown', (e) => this.onNodeMouseDown(e, node, wrap));
+      return wrap;
+    },
+    applyBox(wrap, node) {
       wrap.style.left = (node.x || 0) + 'px';
       wrap.style.top = (node.y || 0) + 'px';
-      wrap.dataset.kind = node.kind || '';
-      wrap.appendChild(this.renderComponent(node.root));
-      return wrap;
+      wrap.style.width = node.w != null ? node.w + 'px' : '';
+      wrap.style.height = node.h != null ? node.h + 'px' : '';
+      wrap.classList.toggle('sized', node.w != null || node.h != null);
+    },
+
+    // Interaction d'un node selon l'outil actif. Un node ne déclenche jamais le
+    // pan du canvas (stopPropagation systématique vers #canvas).
+    onNodeMouseDown(e, node, wrap) {
+      if (e.button !== 0) return;
+      if (this.tool === 'select') {
+        e.stopPropagation();
+        this.selectNode(wrap);
+        return;
+      }
+      const moving = this.tool === 'move' && node.movable !== false;
+      const resizing = this.tool === 'resize' && node.resizable !== false;
+      e.stopPropagation();
+      if (!moving && !resizing) return; // node verrouillé pour cet outil
+      e.preventDefault();
+      this.selectNode(wrap);
+
+      const z = this.view.zoom || 1;
+      const sx = e.clientX, sy = e.clientY;
+      const orig = {
+        x: node.x || 0,
+        y: node.y || 0,
+        // taille auto -> taille rendue. offsetWidth ignore le transform scale()
+        // de .world : c'est déjà en coords monde (donc pas de division par z).
+        w: node.w != null ? node.w : wrap.offsetWidth,
+        h: node.h != null ? node.h : wrap.offsetHeight,
+      };
+      let moved = false;
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', finish);
+        if (moved) this.persistNode(node); // pas de POST sur un simple clic
+      };
+      const onMove = (ev) => {
+        if (!(ev.buttons & 1)) return finish(); // bouton relâché hors fenêtre
+        moved = true;
+        const dx = (ev.clientX - sx) / z; // px écran -> px monde
+        const dy = (ev.clientY - sy) / z;
+        if (moving) { node.x = orig.x + dx; node.y = orig.y + dy; }
+        if (resizing) {
+          node.w = this.clampW(node, orig.w + dx);
+          node.h = this.clampH(node, orig.h + dy);
+        }
+        this.applyBox(wrap, node);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', finish);
+    },
+    clampW(node, w) { w = Math.max(140, w); return node.max_w ? Math.min(w, node.max_w) : w; },
+    clampH(node, h) { h = Math.max(80, h); return node.max_h ? Math.min(h, node.max_h) : h; },
+    selectNode(wrap) {
+      this.$root.querySelectorAll('.node-wrap.selected').forEach((n) => n.classList.remove('selected'));
+      wrap.classList.add('selected');
+      this.selectedId = wrap.dataset.id;
+    },
+    async persistNode(node) {
+      try {
+        await fetch('/api/canvas/nodes/' + node.id, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ x: node.x, y: node.y, w: node.w, h: node.h }),
+        });
+      } catch (e) { /* best-effort */ }
+    },
+    centerOnKernel(nodes) {
+      const k = (nodes || []).find((n) => n.kind === 'kernel');
+      if (!k) return;
+      const wrap = this.$root.querySelector('.node-wrap[data-kind="kernel"]');
+      const w = k.w != null ? k.w : (wrap ? wrap.offsetWidth : 200);
+      const h = k.h != null ? k.h : (wrap ? wrap.offsetHeight : 80);
+      const cx = (k.x || 0) + w / 2;
+      const cy = (k.y || 0) + h / 2;
+      this.view.x = window.innerWidth / 2 - cx * this.view.zoom;
+      this.view.y = window.innerHeight / 2 - cy * this.view.zoom;
     },
     renderComponent(c) {
       if (!c || !c.type) return document.createComment('vide');
@@ -63,10 +158,9 @@ document.addEventListener('alpine:init', () => {
       if (c.type === 'filetree') {
         const el = document.createElement('div');
         el.className = 'cmp-filetree';
-        // L'arbre intercepte molette (sinon zoom canvas) et mousedown (sinon
-        // un clic démarre un pan + un POST viewport) avant #canvas.
+        // La molette défile l'arbre au lieu de zoomer le canvas. (Le mousedown,
+        // lui, est géré par le node-wrap parent : move/resize/select + anti-pan.)
         el.addEventListener('wheel', (ev) => ev.stopPropagation());
-        el.addEventListener('mousedown', (ev) => ev.stopPropagation());
         // Container synchrone ; le contenu est chargé en async (fire-and-forget,
         // fsExpand affiche lui-même une ligne d'erreur si le fetch échoue).
         this.fsExpand(el, c.root_path || '', 0);
@@ -132,6 +226,7 @@ document.addEventListener('alpine:init', () => {
         item.appendChild(children);
         let loaded = false;
         row.addEventListener('click', async (ev) => {
+          if (this.tool !== 'select') return; // déplier seulement avec Sélection
           ev.stopPropagation();
           const opening = children.hidden;
           children.hidden = !opening;
@@ -144,6 +239,7 @@ document.addEventListener('alpine:init', () => {
         });
       } else {
         row.addEventListener('click', (ev) => {
+          if (this.tool !== 'select') return;
           ev.stopPropagation();
           this.$root.querySelectorAll('.fs-row.selected')
             .forEach((n) => n.classList.remove('selected'));

@@ -10,16 +10,18 @@ from mekistudio.backend.models import Node
 KIND = "kernel"
 
 
-def build_kernel_node(x: float = 80.0, y: float = 80.0) -> Node:
+def build_kernel_node(x: float = 0.0, y: float = 0.0) -> Node:
     """kernelNode = NodeComponent > LayoutComponent > HeaderComponent(niveau 1, « Kernel »).
 
-    Premier vrai node : volontairement minimal. Son seul rôle pour l'instant est
-    de valider la chaîne complète modèle -> API -> rendu canvas.
+    Ancre centrale fixe du canvas : ni déplaçable ni redimensionnable. Placé à
+    l'origine (0,0) ; la vue se centre dessus au chargement.
     """
     return Node(
         kind=KIND,
         x=x,
         y=y,
+        movable=False,
+        resizable=False,
         root=NodeComponent(
             children=[
                 LayoutComponent(

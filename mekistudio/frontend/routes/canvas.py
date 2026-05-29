@@ -1,15 +1,48 @@
 from __future__ import annotations
 
+import asyncio
+import math
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from mekistudio.backend import bootstrap
 from mekistudio.backend.models import Viewport
 
 router = APIRouter()
+
+# Tailles minimales d'un node (mêmes valeurs côté JS pour le clamp pendant le drag).
+MIN_W = 140.0
+MIN_H = 80.0
+
+# Sérialise les écritures canvas.json (load -> mutate -> save) : aujourd'hui les
+# handlers sont atomiques (event-loop unique, pas d'await au milieu), mais ce
+# verrou évite tout lost-update si ça change (workers multiples, threadpool...).
+_canvas_lock = asyncio.Lock()
+
+
+class NodeUpdate(BaseModel):
+    """Patch partiel d'un node : position et/ou taille."""
+
+    x: float | None = None
+    y: float | None = None
+    w: float | None = None
+    h: float | None = None
+
+
+def _clamp(value: float, lo: float, hi: float | None) -> float:
+    value = max(lo, value)
+    return min(value, hi) if hi is not None else value
+
+
+def _reject_non_finite(*values: float | None) -> None:
+    """422 propre si un NaN/Infinity est reçu (sinon il finirait en JSON non
+    standard que le navigateur n'arrive plus à relire)."""
+    if any(v is not None and not math.isfinite(v) for v in values):
+        raise HTTPException(status_code=422, detail="valeur numérique non finie")
 
 _TEMPLATES = Jinja2Templates(
     directory=str(Path(__file__).resolve().parent.parent / "templates")
@@ -43,9 +76,46 @@ async def get_canvas(request: Request) -> dict:
 @router.post("/api/canvas/viewport")
 async def set_viewport(request: Request, viewport: Viewport) -> dict:
     root = request.app.state.repo_root
+    _reject_non_finite(viewport.x, viewport.y, viewport.zoom)
     # Le bootstrap garantit que .mekistudio/ existe avant d'écrire canvas.json.
     bootstrap.ensure_meki_dir(root)
-    state = bootstrap.load_canvas(root)
-    state.viewport = viewport
-    bootstrap.save_canvas(root, state)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        state.viewport = viewport
+        bootstrap.save_canvas(root, state)
     return {"status": "ok"}
+
+
+@router.post("/api/canvas/nodes/{node_id}")
+async def update_node(request: Request, node_id: str, upd: NodeUpdate) -> dict:
+    """Déplace et/ou redimensionne un node en faisant respecter ses contraintes
+    (on ne fait pas confiance au client). Persiste dans canvas.json."""
+    root = request.app.state.repo_root
+    _reject_non_finite(upd.x, upd.y, upd.w, upd.h)
+    bootstrap.ensure_meki_dir(root)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        node = next((n for n in state.nodes if n.id == node_id), None)
+        if node is None:
+            raise HTTPException(status_code=404, detail="node introuvable")
+
+        moving = upd.x is not None or upd.y is not None
+        resizing = upd.w is not None or upd.h is not None
+        if moving and not node.movable:
+            raise HTTPException(status_code=422, detail="node non déplaçable")
+        if resizing and not node.resizable:
+            raise HTTPException(status_code=422, detail="node non redimensionnable")
+        if not moving and not resizing:
+            return node.model_dump(mode="json")  # rien à faire : pas d'écriture
+
+        if upd.x is not None:
+            node.x = upd.x
+        if upd.y is not None:
+            node.y = upd.y
+        if upd.w is not None:
+            node.w = _clamp(upd.w, MIN_W, node.max_w)
+        if upd.h is not None:
+            node.h = _clamp(upd.h, MIN_H, node.max_h)
+
+        bootstrap.save_canvas(root, state)
+        return node.model_dump(mode="json")

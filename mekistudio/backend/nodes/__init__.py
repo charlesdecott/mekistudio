@@ -8,6 +8,7 @@ from mekistudio.backend.nodes.registry import (
     NODE_BUILDERS,
     build_node,
     default_canvas,
+    reconcile_constraints,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "NODE_BUILDERS",
     "build_node",
     "default_canvas",
+    "reconcile_constraints",
 ]
