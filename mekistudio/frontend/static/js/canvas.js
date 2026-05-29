@@ -148,29 +148,56 @@ document.addEventListener('alpine:init', () => {
         });
         return obs;
       };
-      const routeOf = (i) => {
+      // état de routage par câble (face + offset) : permet de RE-ROUTER en préservant la face.
+      const face = cables.map((cab, i) => ({ src: sides[i].child, tgt: sides[i].parent }));
+      const off = cables.map((cab, i) => ({ src: offChild[i], tgt: offParent[i] }));
+      const reroute = (i) => {
         const a = nodes.get(cables[i].id), b = nodes.get(cables[i].parent);
-        const anchorA = C.sideAnchor(a.box, sides[i].child, offChild[i]);
-        const anchorB = C.sideAnchor(b.box, sides[i].parent, offParent[i]);
-        return C.routeAround(anchorA, sides[i].child, anchorB, sides[i].parent, obstaclesFor(cables[i]));
+        const aA = C.sideAnchor(a.box, face[i].src, off[i].src);
+        const aB = C.sideAnchor(b.box, face[i].tgt, off[i].tgt);
+        return C.routeAround(aA, face[i].src, aB, face[i].tgt, obstaclesFor(cables[i]));
       };
       const routes = cables.map((cab, i) => {
         const a = nodes.get(cab.id), b = nodes.get(cab.parent);
         const dist = Math.hypot((a.box.x + a.box.w / 2) - (b.box.x + b.box.w / 2),
                                 (a.box.y + a.box.h / 2) - (b.box.y + b.box.h / 2));
-        return dist < C.HIDE_DIST ? null : routeOf(i);
+        return dist < C.HIDE_DIST ? null : reroute(i);
       });
-      // 4b) ESCAPE : si un câble passe ENCORE sous un node (aucun couloir 45° via la face
-      // naturelle), on CHANGE la face de la node concernée (pur 45°) plutôt que de le laisser
-      // traverser. (L'anti-superposition des CÂBLES est différée — cf. spec §12 / IDEAS.)
+      // 4b) ESCAPE : si un câble passe ENCORE sous un node, CHANGER la face de la node
+      // concernée (pur 45°) plutôt que de le laisser traverser. On mémorise la face choisie.
       routes.forEach((r, i) => {
         if (!r) return;
         const obs = obstaclesFor(cables[i]);
         if (!C.pathHits(r, obs)) return;
         const a = nodes.get(cables[i].id), b = nodes.get(cables[i].parent);
-        routes[i] = C.routeAvoiding(a.box, sides[i].child, b.box, sides[i].parent, obs).pts;
+        const av = C.routeAvoiding(a.box, face[i].src, b.box, face[i].tgt, obs);
+        face[i] = { src: av.srcSide, tgt: av.tgtSide }; off[i] = { src: 0, tgt: 0 };
+        routes[i] = av.pts;
       });
-      // 4c) trace (halo + net)
+      // 4c) ANTI-SUPERPOSITION (ruban) : écarte les câbles PARALLÈLES trop proches en décalant
+      // LE CÂBLE (offset, jamais le node), re-routé SUR SA FACE. Pré-filtre bbox, borné. Un
+      // croisement (pentes ≠) est laissé tel quel.
+      const cbox = (r) => {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const p of r) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      };
+      const boxes = routes.map((r) => (r ? cbox(r) : null));
+      for (let pass = 0; pass < 3; pass++) {
+        let changed = false;
+        for (let i = 0; i < cables.length; i++) {
+          for (let j = i + 1; j < cables.length; j++) {
+            if (!routes[i] || !routes[j]) continue;
+            if (!C.bboxesOverlap(boxes[i], boxes[j], C.RIBBON_GAP)) continue;
+            if (!C.cablesOverlap(routes[i], routes[j], C.RIBBON_GAP)) continue;
+            off[j].src += C.RIBBON_GAP; off[j].tgt += C.RIBBON_GAP; // décale le câble j
+            routes[j] = reroute(j); boxes[j] = routes[j] ? cbox(routes[j]) : null;
+            changed = true;
+          }
+        }
+        if (!changed) break;
+      }
+      // 4d) trace (halo + net)
       const seen = new Set();
       cables.forEach((cab, i) => {
         let g = svg.querySelector('g[data-edge="' + cab.id + '"]');

@@ -1477,8 +1477,11 @@ Implémenté en TDD ; `node --test` **17/17** ; validé honnêtement au navigate
   dégage ; repli droit seulement si aucune face). Branché `drawCablesFrom` 4b (**escape** : si
   `pathHits` encore vrai après 4a). Tests : sans obstacle → faces naturelles ; dense → ne passe
   pas sous le node (45°) ; collé à la source → change de face.
-- **T18-bis — Anti-superposition des CÂBLES : DIFFÉRÉE** (fonctions pures conservées et testées,
-  non branchées — la passe de bump écrasait le changement de face).
+- **T18-bis — Anti-superposition des CÂBLES (ruban) : IMPLÉMENTÉE** : `RIBBON_GAP`=20,
+  `segOverlap`/`cablesOverlap` (parallèles trop proches + recouvrement → ruban ; croisement
+  toléré). `drawCablesFrom` mémorise `face[]`/`off[]` + `reroute(i)` ; passe 4c bbox-préfiltrée
+  qui décale le câble (`+RIBBON_GAP`) et le re-route SUR SA FACE, bornée (3 passes). Validé :
+  `node --test` 19/19 ; app cascade → 0 paire trop proche.
 - **T19 — Validation honnête (Playwright)** : sur disposition **dense réelle** sans
   chevauchement → 0 câble sous un node, contournement appliqué (7 segments), 0 erreur. A révélé
   **D17** : un obstacle qui **chevauche** une extrémité reste irrésoluble → nécessite

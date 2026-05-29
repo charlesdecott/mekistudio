@@ -172,3 +172,27 @@ test('routeAvoiding: obstacle collé à la source -> change la face de sortie', 
   assert.notEqual(r.srcSide, 'right');            // a dû changer de face source
   assert.ok(all45(r.pts));
 });
+
+// --- anti-superposition des câbles (ruban) : segOverlap / cablesOverlap ---
+
+test('segOverlap: parallèles proches qui se recouvrent vs loin vs croisement', () => {
+  const G = C.RIBBON_GAP;
+  const a0 = { x: 0, y: 0 }, a1 = { x: 100, y: 0 };          // horizontal
+  // parallèle, à 5px (< RIBBON_GAP), recouvrement -> true
+  assert.equal(C.segOverlap(a0, a1, { x: 20, y: 5 }, { x: 120, y: 5 }, G), true);
+  // parallèle mais à 40px (> RIBBON_GAP) -> false
+  assert.equal(C.segOverlap(a0, a1, { x: 20, y: 40 }, { x: 120, y: 40 }, G), false);
+  // même droite mais bout-à-bout (pas de recouvrement) -> false
+  assert.equal(C.segOverlap(a0, a1, { x: 200, y: 0 }, { x: 300, y: 0 }, G), false);
+  // croisement (perpendiculaire) -> false (toléré)
+  assert.equal(C.segOverlap(a0, a1, { x: 50, y: -50 }, { x: 50, y: 50 }, G), false);
+});
+
+test('cablesOverlap: deux câbles quasi-confondus vs croisement', () => {
+  const G = C.RIBBON_GAP;
+  const c1 = C.subwayPoints({ x: 0, y: 0 }, 'right', { x: 400, y: 200 }, 'left');
+  const close = C.subwayPoints({ x: 0, y: 6 }, 'right', { x: 400, y: 206 }, 'left');  // ~6px à côté
+  const crossing = C.subwayPoints({ x: 0, y: 200 }, 'right', { x: 400, y: 0 }, 'left'); // pente opposée
+  assert.equal(C.cablesOverlap(c1, close, G), true);
+  assert.equal(C.cablesOverlap(c1, crossing, G), false);
+});

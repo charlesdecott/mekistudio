@@ -5,6 +5,7 @@
   const GAP_LANE = 12;   // espacement de base entre lanes d'un même (node, côté)
   const MARGE = 10;      // garde une ancre sur la face du node
   const HIDE_DIST = 24;  // sous ce centre-à-centre, on masque le câble
+  const RIBBON_GAP = 20; // écart mini entre deux câbles parallèles (anti-superposition)
 
   const cx = (b) => b.x + b.w / 2;
   const cy = (b) => b.y + b.h / 2;
@@ -227,10 +228,38 @@
     return { pts: subwayPoints(sA, baseSrc, sB, baseTgt), srcSide: baseSrc, tgtSide: baseTgt, hit: true };
   }
 
+  // Deux segments PARALLÈLES, plus proches que minSep (distance perpendiculaire), dont les
+  // projections se recouvrent → ils se « confondent » (ruban trop serré). Pentes différentes
+  // (croisement ponctuel) → false (toléré).
+  function segOverlap(p1, q1, p2, q2, minSep) {
+    const d1x = q1.x - p1.x, d1y = q1.y - p1.y, l1 = Math.hypot(d1x, d1y);
+    const d2x = q2.x - p2.x, d2y = q2.y - p2.y, l2 = Math.hypot(d2x, d2y);
+    if (l1 < 1 || l2 < 1) return false;
+    if (Math.abs(d1x * d2y - d1y * d2x) / (l1 * l2) > 0.08) return false;     // pas parallèle → croisement
+    const perp = Math.abs((p2.x - p1.x) * d1y - (p2.y - p1.y) * d1x) / l1;
+    if (perp >= minSep) return false;                                        // assez écartés
+    const t = (p) => ((p.x - p1.x) * d1x + (p.y - p1.y) * d1y) / (l1 * l1);
+    let b0 = t(p2), b1 = t(q2); if (b0 > b1) { const k = b0; b0 = b1; b1 = k; }
+    const lo = Math.max(0, b0), hi = Math.min(1, b1);
+    return (hi - lo) * l1 > minSep;                                          // recouvrement significatif
+  }
+
+  // Deux câbles (suites de points) se confondent-ils sur une portion ? (pré-filtre bbox côté appelant)
+  function cablesOverlap(c1, c2, minSep) {
+    for (let i = 1; i < c1.length; i++) {
+      if (Math.hypot(c1[i].x - c1[i - 1].x, c1[i].y - c1[i - 1].y) < 2) continue;
+      for (let j = 1; j < c2.length; j++) {
+        if (Math.hypot(c2[j].x - c2[j - 1].x, c2[j].y - c2[j - 1].y) < 2) continue;
+        if (segOverlap(c1[i - 1], c1[i], c2[j - 1], c2[j], minSep)) return true;
+      }
+    }
+    return false;
+  }
+
   const MekiCables = {
-    STUB, GAP_LANE, MARGE, HIDE_DIST, adaptiveSide, sideAnchor, assignLanes, subwayPoints, pointsToPath, cableClass,
+    STUB, GAP_LANE, MARGE, HIDE_DIST, RIBBON_GAP, adaptiveSide, sideAnchor, assignLanes, subwayPoints, pointsToPath, cableClass,
     segHitsBox, pathHits, routeAround, diagOf, diagsOverlap, segBBox, bboxesOverlap,
-    route45OrNull, routeAvoiding,
+    route45OrNull, routeAvoiding, segOverlap, cablesOverlap,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiCables;
   if (typeof window !== 'undefined') window.MekiCables = MekiCables;
