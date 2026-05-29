@@ -15,13 +15,18 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   pull, relance un `serve` frais).
 - ✅ **Phase 2 — docs de référence** : concepts des deux anciennes versions
   dans `docs/old/mekistudio/` (8 docs) et `docs/old/mekistudio-lego/` (4 docs).
-- 🟡 **Jalon 2 — système de composants + 1er node (`kernelNode`)** : composants
+- 🟡 **Jalon 2 — système de composants + premiers nodes** : composants
   primitifs Pydantic (`backend/components/` : `NodeComponent`, `LayoutComponent`,
-  `HeaderComponent` niveaux 1–4, union discriminée sur `type`), assemblages dans
-  `backend/nodes/` (`kernel.py` + `registry.py` avec `NODE_BUILDERS` /
-  `default_canvas()`). **Seam typé** : `CanvasState.nodes` est désormais
-  `list[Node]`. Canvas neuf seedé avec le kernelNode ; rendu récursif côté
-  `canvas.js`. Reste : drag/sélection, mutations via API, WebSocket.
+  `HeaderComponent` niveaux 1–4, `FileTreeComponent`, union discriminée sur
+  `type`), assemblages dans `backend/nodes/` (`kernel.py`, `file_explorer.py` +
+  `registry.py` avec `NODE_BUILDERS` / `default_canvas()`). **Seam typé** :
+  `CanvasState.nodes` est désormais `list[Node]`. Canvas neuf seedé (kernel +
+  explorateur) ; rendu récursif côté `canvas.js`.
+  - `kernelNode` : header de niveau 1.
+  - `fileExplorer` : arbre façon VSCode, dépliage **paresseux** via `GET /api/fs`
+    (listing sandboxé au repo, `__pycache__` masqué), icônes emoji par type,
+    scrollbar discrète.
+  - Reste : drag/sélection, mutations canvas via API, WebSocket.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 

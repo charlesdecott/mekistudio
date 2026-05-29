@@ -42,3 +42,45 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
   padding: 6px 10px; border: 1px dashed #5a6275; border-radius: 6px;
   color: #aaa; font-size: 12px;
 }
+
+/* --- explorateur de fichiers --- */
+.cmp-filetree {
+  margin-top: 8px;
+  min-width: 240px;
+  max-height: 360px;
+  overflow: auto;
+  font-size: 13px;
+}
+.fs-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 8px 2px 2px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fs-row:hover { background: #232b3d; }
+.fs-row.selected { background: #2d3a55; }
+.fs-caret {
+  width: 12px; flex: none; text-align: center;
+  color: #8a93a6; font-size: 10px;
+}
+.fs-icon { width: 18px; flex: none; text-align: center; }
+.fs-name { color: #d6dae3; overflow: hidden; text-overflow: ellipsis; }
+.fs-error { color: #e0a070; cursor: default; }
+.fs-error:hover { background: none; }
+
+/* scrollbar discrète (dark) : piste transparente + pouce fin et translucide,
+   au lieu du gros rectangle blanc par défaut. Firefox + WebKit/Chromium. */
+.cmp-filetree {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, .2) transparent;
+}
+.cmp-filetree::-webkit-scrollbar { width: 10px; height: 10px; }
+.cmp-filetree::-webkit-scrollbar-track { background: transparent; }
+.cmp-filetree::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, .16);
+  border: 2px solid transparent;   /* pouce "flottant" qui ne touche pas les bords */
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+.cmp-filetree::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, .32); }
