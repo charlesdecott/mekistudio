@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from packages.backend.models import CanvasState, Manifest, Viewport
+from mekistudio.backend.models import CanvasState, Manifest, Viewport
 
 
 def test_manifest_defaults():

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from packages.backend import bootstrap, paths
-from packages.backend.models import CanvasState, Viewport
+from mekistudio.backend import bootstrap, paths
+from mekistudio.backend.models import CanvasState, Viewport
 
 
 def test_ensure_creates_meki_dir(tmp_path):
