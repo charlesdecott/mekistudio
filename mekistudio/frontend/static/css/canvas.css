@@ -18,6 +18,33 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
   font-size: 13px; pointer-events: none;
 }
 
+/* --- toolbar gauche (discrète) --- */
+.toolbar {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  z-index: 20;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 5px; border-radius: 12px;
+  background: rgba(20, 24, 32, .8);
+  border: 1px solid #2c3650;
+  backdrop-filter: blur(4px);
+}
+.tool-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border: 0; border-radius: 8px;
+  background: transparent; color: #8a93a6;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.tool-btn:hover { background: rgba(255, 255, 255, .07); color: #c8d0de; }
+.tool-btn.active { background: #2d3a55; color: #eaf0ff; }
+
+/* curseurs selon l'outil actif */
+#canvas.tool-select .node-wrap { cursor: default; }  /* pas le grab du fond */
+#canvas.tool-move .node-wrap[data-movable="true"] { cursor: move; }
+#canvas.tool-move .node-wrap[data-movable="false"] { cursor: not-allowed; }
+#canvas.tool-resize .node-wrap[data-resizable="true"] { cursor: nwse-resize; }
+#canvas.tool-resize .node-wrap[data-resizable="false"] { cursor: not-allowed; }
+
 /* --- composants (rendus par canvas.js dans .world) --- */
 .node-wrap { position: absolute; }
 .cmp-node {
@@ -29,7 +56,19 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
   box-shadow: 0 10px 30px rgba(0, 0, 0, .45);
   color: #e6e6e6;
   user-select: none;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
+
+/* node dimensionné (w/h explicites) : la carte et son contenu épousent la taille */
+.node-wrap.sized { display: flex; }
+/* min-width:0/min-height:0 : sinon le min-width:200px de .cmp-node empêche de
+   descendre sous 200px et la carte déborde du wrap entre 140 et 199px. */
+.node-wrap.sized .cmp-node { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.node-wrap.sized .cmp-node > .cmp-layout { flex: 1 1 auto; min-height: 0; }
+.node-wrap.sized .cmp-filetree { flex: 1 1 auto; min-height: 0; max-height: none; min-width: 0; }
+.node-wrap.selected .cmp-node { outline: 2px solid #4d8dff; outline-offset: 2px; }
 .cmp-layout { display: flex; }
 .cmp-layout.dir-column { flex-direction: column; }
 .cmp-layout.dir-row { flex-direction: row; align-items: center; }

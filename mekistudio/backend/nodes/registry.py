@@ -18,6 +18,23 @@ def build_node(kind: str, **kwargs) -> Node:
     return NODE_BUILDERS[kind](**kwargs)
 
 
+def reconcile_constraints(state: CanvasState) -> CanvasState:
+    """Réimpose les contraintes intrinsèques au kind (movable / resizable /
+    max_*) sur les nodes chargés. Ces contraintes ne doivent jamais provenir du
+    JSON persisté : sinon un vieux canvas.json (écrit avant ces champs) rendrait
+    p.ex. le kernel déplaçable via les défauts permissifs du modèle."""
+    for node in state.nodes:
+        builder = NODE_BUILDERS.get(node.kind)
+        if builder is None:
+            continue
+        tmpl = builder()
+        node.movable = tmpl.movable
+        node.resizable = tmpl.resizable
+        node.max_w = tmpl.max_w
+        node.max_h = tmpl.max_h
+    return state
+
+
 def default_canvas() -> CanvasState:
     """Canvas initial : les nodes built-in (kernel + explorateur de fichiers),
     pour que le canvas ne soit jamais vide."""

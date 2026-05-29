@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from mekistudio.backend.models import CanvasState, Manifest, Viewport
+from mekistudio.backend.components import NodeComponent
+from mekistudio.backend.models import CanvasState, Manifest, Node, Viewport
+
+
+def test_node_defaults():
+    n = Node(kind="demo", root=NodeComponent())
+    assert (n.x, n.y) == (0, 0)
+    assert n.w is None and n.h is None
+    assert n.movable is True and n.resizable is True
+    assert n.max_w is None and n.max_h is None
 
 
 def test_manifest_defaults():

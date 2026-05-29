@@ -41,6 +41,21 @@ def test_fresh_canvas_seeds_builtin_nodes(tmp_path):
     assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer"}
 
 
+def test_load_reconciles_kind_constraints(tmp_path):
+    # Simule un canvas.json où le kernel aurait (à tort) été persisté déplaçable.
+    bootstrap.ensure_meki_dir(tmp_path)
+    state = bootstrap.load_canvas(tmp_path)
+    for n in state.nodes:
+        if n.kind == "kernel":
+            n.movable = True
+            n.resizable = True
+    bootstrap.save_canvas(tmp_path, state)
+    # Au rechargement, les contraintes du kind sont réimposées.
+    reloaded = bootstrap.load_canvas(tmp_path)
+    kernel = next(n for n in reloaded.nodes if n.kind == "kernel")
+    assert kernel.movable is False and kernel.resizable is False
+
+
 def test_save_then_load_canvas(tmp_path):
     bootstrap.ensure_meki_dir(tmp_path)
     state = CanvasState(viewport=Viewport(x=3, y=4, zoom=1.5))

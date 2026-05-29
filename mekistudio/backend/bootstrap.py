@@ -6,7 +6,7 @@ from pathlib import Path
 
 from mekistudio.backend import paths
 from mekistudio.backend.models import CanvasState, Manifest
-from mekistudio.backend.nodes import default_canvas
+from mekistudio.backend.nodes import default_canvas, reconcile_constraints
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def load_canvas(root: Path) -> CanvasState:
         return default_canvas()
     try:
         data = json.loads(cpath.read_text(encoding="utf-8"))
-        return CanvasState.model_validate(data)
+        state = CanvasState.model_validate(data)
     except Exception as exc:  # JSON corrompu / schéma invalide
         # On préserve le fichier fautif en .bak (sinon le prochain save l'écrase
         # en silence) puis on retombe sur le canvas par défaut — jamais vide.
@@ -48,6 +48,10 @@ def load_canvas(root: Path) -> CanvasState:
         except OSError:
             pass
         return default_canvas()
+    # Les contraintes (movable/resizable/max_*) sont intrinsèques au kind : on
+    # les réimpose depuis la fabrique (un vieux canvas.json ne doit pas pouvoir
+    # rendre le kernel déplaçable via des défauts permissifs).
+    return reconcile_constraints(state)
 
 
 def save_canvas(root: Path, state: CanvasState) -> None:
@@ -64,4 +68,11 @@ def _load_manifest(root: Path) -> Manifest:
 
 
 def _write_json(path: Path, payload: dict) -> None:
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    # Écriture atomique : on écrit un fichier temporaire du même dossier puis on
+    # le renomme (rename atomique sur le même FS, POSIX comme Windows) — un crash
+    # en cours d'écriture ne laisse jamais un canvas.json tronqué.
+    # allow_nan=False : un NaN/Infinity lève ici plutôt que de produire du JSON
+    # non standard qui casserait la relecture côté navigateur.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8")
+    tmp.replace(path)

@@ -20,13 +20,23 @@ class Viewport(BaseModel):
 
 
 class Node(BaseModel):
-    """Un node positionné sur le canvas. `root` est l'arbre de composants
-    (un NodeComponent qui contient layout, header, ...)."""
+    """Un node positionné sur le canvas. `root` est l'arbre de composants.
+
+    Position (x, y) et taille (w, h ; None = auto, taille du contenu) sont
+    persistées et modifiables. Les contraintes (movable / resizable / max_*)
+    sont intrinsèques au kind : posées par la fabrique, pas éditables par l'UI.
+    """
 
     id: str = Field(default_factory=new_id)
     kind: str
     x: float = 0.0
     y: float = 0.0
+    w: float | None = None
+    h: float | None = None
+    movable: bool = True
+    resizable: bool = True
+    max_w: float | None = None
+    max_h: float | None = None
     root: NodeComponent
 
 

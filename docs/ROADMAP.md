@@ -26,7 +26,11 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   - `fileExplorer` : arbre façon VSCode, dépliage **paresseux** via `GET /api/fs`
     (listing sandboxé au repo, `__pycache__` masqué), icônes emoji par type,
     scrollbar discrète.
-  - Reste : drag/sélection, mutations canvas via API, WebSocket.
+  - **Manipulation des nodes** : toolbar gauche (sélection / déplacer /
+    redimensionner), contraintes par node (`movable` / `resizable` / `max_*`,
+    re-dérivées du kind au chargement), kernel figé au centre. Persistance via
+    `POST /api/canvas/nodes/{id}` (écriture atomique, rejet des valeurs non finies).
+  - Reste : ajout/suppression de nodes via API, câbles/wires, WebSocket.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 

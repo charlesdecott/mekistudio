@@ -43,6 +43,18 @@ def test_build_file_explorer_node_structure():
     assert isinstance(tree, FileTreeComponent) and tree.root_path == ""
 
 
+def test_kernel_is_fixed_anchor():
+    n = build_kernel_node()
+    assert n.movable is False
+    assert n.resizable is False
+
+
+def test_file_explorer_is_movable_resizable_box():
+    n = build_file_explorer_node()
+    assert n.movable is True and n.resizable is True
+    assert n.w and n.h  # taille par défaut (boîte)
+
+
 def test_build_node_by_kind():
     assert build_node(KERNEL_KIND).kind == KERNEL_KIND
     assert build_node(FILE_EXPLORER_KIND).kind == FILE_EXPLORER_KIND

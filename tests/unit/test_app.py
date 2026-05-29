@@ -52,6 +52,77 @@ def test_fs_rejects_traversal(tmp_path):
     assert r.status_code == 422
 
 
+def _ids_by_kind(client):
+    nodes = client.get("/api/canvas").json()["nodes"]
+    return {n["kind"]: n["id"] for n in nodes}
+
+
+def test_move_node_persists(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['fileexplorer']}", json={"x": 500, "y": 250})
+    assert r.status_code == 200
+    nodes = client.get("/api/canvas").json()["nodes"]
+    fe = next(n for n in nodes if n["kind"] == "fileexplorer")
+    assert (fe["x"], fe["y"]) == (500, 250)
+
+
+def test_resize_clamps_to_min(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['fileexplorer']}", json={"w": 10, "h": 10})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["w"] == 140 and body["h"] == 80  # clampé au minimum
+
+
+def test_kernel_cannot_move(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['kernel']}", json={"x": 9, "y": 9})
+    assert r.status_code == 422
+
+
+def test_kernel_cannot_resize(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['kernel']}", json={"w": 300})
+    assert r.status_code == 422
+
+
+def test_update_unknown_node_404(tmp_path):
+    r = _client(tmp_path).post("/api/canvas/nodes/nope", json={"x": 1})
+    assert r.status_code == 404
+
+
+def test_update_empty_body_is_noop(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(f"/api/canvas/nodes/{ids['fileexplorer']}", json={})
+    assert r.status_code == 200
+
+
+def test_update_rejects_non_finite(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    # Infinity littéral (json tolérant côté serveur) -> rejeté par allow_inf_nan
+    r = client.post(
+        f"/api/canvas/nodes/{ids['fileexplorer']}",
+        content='{"w": Infinity}',
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 422
+
+
+def test_viewport_rejects_non_finite(tmp_path):
+    r = _client(tmp_path).post(
+        "/api/canvas/viewport",
+        content='{"x": NaN, "y": 0, "zoom": 1}',
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 422
+
+
 def test_post_viewport_persists(tmp_path):
     client = _client(tmp_path)
     r = client.post("/api/canvas/viewport", json={"x": 12, "y": -3, "zoom": 2})
