@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import uuid
-
 from pydantic import BaseModel, Field
+
+from mekistudio.backend.components import NodeComponent, new_id
 
 
 class Manifest(BaseModel):
     """Identité du projet, persistée dans .mekistudio/manifest.json."""
 
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    id: str = Field(default_factory=new_id)
     name: str
     schema_version: int = 1
 
@@ -19,11 +19,22 @@ class Viewport(BaseModel):
     zoom: float = 1.0
 
 
+class Node(BaseModel):
+    """Un node positionné sur le canvas. `root` est l'arbre de composants
+    (un NodeComponent qui contient layout, header, ...)."""
+
+    id: str = Field(default_factory=new_id)
+    kind: str
+    x: float = 0.0
+    y: float = 0.0
+    root: NodeComponent
+
+
 class CanvasState(BaseModel):
-    """État du canvas. nodes/edges restent en list[dict] au Jalon 1 — c'est
-    le seam : on typera les nodes quand on branchera le premier vrai node."""
+    """État du canvas. `nodes` est désormais typé (seam branché au premier vrai
+    node) ; `edges` reste en list[dict] tant qu'on n'a pas de câbles/wires."""
 
     schema_version: int = 1
-    nodes: list[dict] = Field(default_factory=list)
+    nodes: list[Node] = Field(default_factory=list)
     edges: list[dict] = Field(default_factory=list)
     viewport: Viewport = Field(default_factory=Viewport)

@@ -35,13 +35,15 @@ async def index(request: Request):
 @router.get("/api/canvas")
 async def get_canvas(request: Request) -> dict:
     root = request.app.state.repo_root
+    # Assure le seed du canvas (kernelNode) même si /api/canvas est la 1re requête.
+    bootstrap.ensure_meki_dir(root)
     return bootstrap.load_canvas(root).model_dump(mode="json")
 
 
 @router.post("/api/canvas/viewport")
 async def set_viewport(request: Request, viewport: Viewport) -> dict:
     root = request.app.state.repo_root
-    # Bootstrap guarantees .mekistudio/ exists before we write canvas.json.
+    # Le bootstrap garantit que .mekistudio/ existe avant d'écrire canvas.json.
     bootstrap.ensure_meki_dir(root)
     state = bootstrap.load_canvas(root)
     state.viewport = viewport

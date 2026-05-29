@@ -15,6 +15,13 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   pull, relance un `serve` frais).
 - ✅ **Phase 2 — docs de référence** : concepts des deux anciennes versions
   dans `docs/old/mekistudio/` (8 docs) et `docs/old/mekistudio-lego/` (4 docs).
+- 🟡 **Jalon 2 — système de composants + 1er node (`kernelNode`)** : composants
+  primitifs Pydantic (`backend/components/` : `NodeComponent`, `LayoutComponent`,
+  `HeaderComponent` niveaux 1–4, union discriminée sur `type`), assemblages dans
+  `backend/nodes/` (`kernel.py` + `registry.py` avec `NODE_BUILDERS` /
+  `default_canvas()`). **Seam typé** : `CanvasState.nodes` est désormais
+  `list[Node]`. Canvas neuf seedé avec le kernelNode ; rendu récursif côté
+  `canvas.js`. Reste : drag/sélection, mutations via API, WebSocket.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 
@@ -25,8 +32,8 @@ Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 Typer, FastAPI/uvicorn, Jinja2, Alpine.js, Pydantic v2, Claude Agent SDK,
 pytest.
 
-**Seam déjà en place** : `CanvasState.nodes` / `edges` sont en `list[dict]` —
-à typer quand on branche le premier vrai node.
+**Seam** : `CanvasState.nodes` est typé `list[Node]` (branché au kernelNode) ;
+`edges` reste en `list[dict]` tant qu'il n'y a pas de câbles/wires.
 
 ## Reste à faire (incrémental, un node/backend à la fois)
 

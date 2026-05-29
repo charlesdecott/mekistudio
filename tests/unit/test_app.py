@@ -29,7 +29,10 @@ def test_get_canvas_returns_state(tmp_path):
     r = _client(tmp_path).get("/api/canvas")
     assert r.status_code == 200
     body = r.json()
-    assert body["nodes"] == []
+    # Le canvas neuf est seedé avec le kernelNode (fini le canvas vide).
+    assert len(body["nodes"]) == 1
+    assert body["nodes"][0]["kind"] == "kernel"
+    assert body["nodes"][0]["root"]["type"] == "node"
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 
 

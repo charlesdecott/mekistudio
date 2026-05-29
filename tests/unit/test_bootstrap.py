@@ -24,10 +24,23 @@ def test_ensure_is_idempotent(tmp_path):
 
 def test_load_canvas_survives_corrupt_json(tmp_path):
     bootstrap.ensure_meki_dir(tmp_path)
-    paths.canvas_path(tmp_path).write_text("{ pas du json", encoding="utf-8")
+    cpath = paths.canvas_path(tmp_path)
+    cpath.write_text("{ pas du json", encoding="utf-8")
     state = bootstrap.load_canvas(tmp_path)
     assert isinstance(state, CanvasState)
     assert state.viewport == Viewport()  # défauts, pas de crash
+    # Invariant « jamais vide » : on retombe sur le canvas par défaut (kernelNode).
+    assert len(state.nodes) == 1
+    assert state.nodes[0].kind == "kernel"
+    # Le fichier corrompu est préservé en .bak (pas de perte silencieuse).
+    assert cpath.with_name(cpath.name + ".bak").read_text(encoding="utf-8") == "{ pas du json"
+
+
+def test_fresh_canvas_seeds_kernel_node(tmp_path):
+    bootstrap.ensure_meki_dir(tmp_path)
+    state = bootstrap.load_canvas(tmp_path)
+    assert len(state.nodes) == 1
+    assert state.nodes[0].kind == "kernel"
 
 
 def test_save_then_load_canvas(tmp_path):

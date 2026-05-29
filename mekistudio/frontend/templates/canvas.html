@@ -6,11 +6,13 @@
   <title>{{ project_name }} — mekistudio</title>
   <link rel="stylesheet" href="/static/css/canvas.css">
   <script>window.__PROJECT_NAME__ = {{ project_name | tojson }};</script>
-  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- canvas.js AVANT Alpine : il enregistre le composant sur `alpine:init`,
+       qui doit être écouté avant qu'Alpine ne démarre. -->
   <script defer src="/static/js/canvas.js"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
-  <div id="canvas" x-data="canvas()" x-init="init()"
+  <div id="canvas" x-data="canvas"
        :style="gridStyle()"
        @mousedown="startPan($event)" @mousemove="onPan($event)"
        @mouseup="endPan()" @mouseleave="endPan()"

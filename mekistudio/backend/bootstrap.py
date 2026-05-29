@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mekistudio.backend import paths
 from mekistudio.backend.models import CanvasState, Manifest
+from mekistudio.backend.nodes import default_canvas
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ def ensure_meki_dir(root: Path) -> Manifest:
 
     cpath = paths.canvas_path(root)
     if not cpath.exists():
-        _write_json(cpath, CanvasState().model_dump(mode="json"))
+        # Canvas neuf seedé avec le kernelNode : le canvas n'est jamais vide.
+        _write_json(cpath, default_canvas().model_dump(mode="json"))
 
     return manifest
 
@@ -32,13 +34,20 @@ def ensure_meki_dir(root: Path) -> Manifest:
 def load_canvas(root: Path) -> CanvasState:
     cpath = paths.canvas_path(root)
     if not cpath.exists():
-        return CanvasState()
+        # Jamais de canvas vide : on retombe sur le canvas par défaut (kernelNode).
+        return default_canvas()
     try:
         data = json.loads(cpath.read_text(encoding="utf-8"))
         return CanvasState.model_validate(data)
     except Exception as exc:  # JSON corrompu / schéma invalide
-        log.warning("canvas.json illisible (%s) — valeurs par défaut", exc)
-        return CanvasState()
+        # On préserve le fichier fautif en .bak (sinon le prochain save l'écrase
+        # en silence) puis on retombe sur le canvas par défaut — jamais vide.
+        log.warning("canvas.json illisible (%s) — sauvegarde .bak + canvas par défaut", exc)
+        try:
+            cpath.replace(cpath.with_name(cpath.name + ".bak"))
+        except OSError:
+            pass
+        return default_canvas()
 
 
 def save_canvas(root: Path, state: CanvasState) -> None:
