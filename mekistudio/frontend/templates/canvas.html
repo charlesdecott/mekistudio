@@ -8,6 +8,8 @@
   <script>window.__PROJECT_NAME__ = {{ project_name | tojson }};</script>
   <!-- canvas.js AVANT Alpine : il enregistre le composant sur `alpine:init`,
        qui doit être écouté avant qu'Alpine ne démarre. -->
+  <!-- géométrie pure des câbles (window.MekiCables) — avant canvas.js qui l'utilise. -->
+  <script defer src="/static/js/cables.js"></script>
   <script defer src="/static/js/canvas.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <!-- éditeur CodeMirror : module ESM, expose window.MekiEditor (chargé en async). -->
