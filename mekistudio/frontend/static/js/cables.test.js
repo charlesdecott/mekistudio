@@ -42,3 +42,39 @@ test('assignLanes: offsets centrés, triés par le voisin, gap clampé, jamais �
   // 1 seul câble -> offset 0
   assert.deepEqual(C.assignLanes([{ neighbor: box(400, 0, 10, 10) }], node, 'right'), [0]);
 });
+
+function segs(points) {
+  const out = [];
+  for (let i = 1; i < points.length; i++) {
+    out.push({ dx: points[i].x - points[i - 1].x, dy: points[i].y - points[i - 1].y });
+  }
+  return out;
+}
+
+test('subwayPoints: exactement une diagonale 45° stricte, reste axis-aligned', () => {
+  const A = { x: 100, y: 100 }, B = { x: 400, y: 220 };
+  const pts = C.subwayPoints(A, 'right', B, 'left');
+  const s = segs(pts);
+  const diag = s.filter((g) => Math.abs(g.dx) > 0.001 && Math.abs(g.dy) > 0.001);
+  assert.equal(diag.length, 1, 'une seule diagonale');
+  assert.ok(Math.abs(Math.abs(diag[0].dx) - Math.abs(diag[0].dy)) < 0.001, '45° strict');
+  // les autres segments sont horizontaux ou verticaux
+  s.filter((g) => g !== diag[0]).forEach((g) => {
+    assert.ok(Math.abs(g.dx) < 0.001 || Math.abs(g.dy) < 0.001);
+  });
+});
+
+test('subwayPoints: run vertical dominant gère le 45° sans déborder', () => {
+  const A = { x: 100, y: 100 }, B = { x: 140, y: 400 };
+  const s = segs(C.subwayPoints(A, 'right', B, 'left'));
+  const diag = s.filter((g) => Math.abs(g.dx) > 0.001 && Math.abs(g.dy) > 0.001);
+  assert.equal(diag.length, 1);
+  assert.ok(Math.abs(Math.abs(diag[0].dx) - Math.abs(diag[0].dy)) < 0.001);
+});
+
+test('pointsToPath: M..L.. uniquement, segments = points-1', () => {
+  const d = C.pointsToPath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 10 }]);
+  assert.match(d, /^M [\d.]+ [\d.]+( L [\d.]+ [\d.]+)+$/);
+  assert.equal((d.match(/L/g) || []).length, 2);
+  assert.ok(!/[CQA]/.test(d), 'pas de courbe');
+});
