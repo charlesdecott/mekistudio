@@ -7,7 +7,7 @@ AI dev studio en **pur Python, sans Docker, auto-hébergé** : un seul repo (`C:
 - Stack : uv · Typer · FastAPI/uvicorn · Jinja2 · Alpine.js · Pydantic v2 · Claude Agent SDK · pytest.
 - CLI : `serve` (canvas sur :8777, bootstrap `.mekistudio/`) · `update` (git pull, code live) · `update --restart` (stop + pull + relance).
 - Install global **editable** (`uv tool install --editable .`) → le code est lu en direct depuis le repo.
-- Seam : `CanvasState.nodes/edges` en `list[dict]`, à typer au premier vrai node.
+- Composants : `backend/components/` (primitives Pydantic, union discriminée sur `type`) assemblés en nodes dans `backend/nodes/` (`registry.py` → `NODE_BUILDERS`/`default_canvas`). `CanvasState.nodes` typé `list[Node]` ; `edges` reste `list[dict]` (pas encore de wires).
 
 ## Docs
 - `docs/ROADMAP.md` — où on en est + reste à faire (à lire en premier).
