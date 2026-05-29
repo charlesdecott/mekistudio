@@ -279,3 +279,39 @@ def test_post_viewport_persists(tmp_path):
     assert r.status_code == 200
     again = client.get("/api/canvas").json()
     assert again["viewport"] == {"x": 12, "y": -3, "zoom": 2}
+
+
+def test_create_fileeditor_derives_source_id(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    node = client.post("/api/canvas/nodes", json={"kind": "fileeditor", "x": 700, "y": 0}).json()
+    assert node["source_id"] == ids["fileexplorer"]  # parent dérivé côté serveur
+
+
+def test_create_node_explicit_source_id_override(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    node = client.post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 1, "y": 1, "source_id": ids["kernel"]},
+    ).json()
+    assert node["source_id"] == ids["kernel"]
+
+
+def test_create_node_bogus_source_id_falls_back_to_derived(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    node = client.post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 1, "y": 1, "source_id": "ghost"},
+    ).json()
+    assert node["source_id"] == ids["fileexplorer"]  # bidon -> dérivé, pas de 422
+
+
+def test_open_preserves_source_id(tmp_path):
+    (tmp_path / "f.txt").write_text("hi", encoding="utf-8")
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    eid = client.post("/api/canvas/nodes", json={"kind": "fileeditor", "x": 1, "y": 1}).json()["id"]
+    opened = client.post(f"/api/canvas/nodes/{eid}/open", json={"path": "f.txt"}).json()
+    assert opened["source_id"] == ids["fileexplorer"]  # /open n'efface pas le lien

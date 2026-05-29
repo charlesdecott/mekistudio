@@ -17,7 +17,12 @@ from mekistudio.backend.components import (
     iter_components,
 )
 from mekistudio.backend.models import Viewport
-from mekistudio.backend.nodes import NODE_BUILDERS, build_node, default_canvas
+from mekistudio.backend.nodes import (
+    NODE_BUILDERS,
+    build_node,
+    canonical_parent_id,
+    default_canvas,
+)
 
 router = APIRouter()
 
@@ -62,11 +67,13 @@ class NodeOpen(BaseModel):
 
 
 class NodeCreate(BaseModel):
-    """Crée un node d'un kind donné à une position."""
+    """Crée un node d'un kind donné à une position. `source_id` : override optionnel
+    du parent logique (sinon dérivé côté serveur)."""
 
     kind: str
     x: float = 0.0
     y: float = 0.0
+    source_id: str | None = None
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -170,6 +177,12 @@ async def create_node(request: Request, body: NodeCreate) -> dict:
         if len(state.nodes) >= MAX_NODES:
             raise HTTPException(status_code=422, detail="trop de nodes sur le canvas")
         node = build_node(body.kind, x=body.x, y=body.y)
+        # source_id dérivé côté serveur (le client n'a rien à envoyer) ; override
+        # accepté seulement s'il référence un node existant.
+        if body.source_id and any(n.id == body.source_id for n in state.nodes):
+            node.source_id = body.source_id
+        else:
+            node.source_id = canonical_parent_id(state, body.kind)
         state.nodes.append(node)
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
