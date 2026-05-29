@@ -52,7 +52,12 @@ def test_kernel_is_fixed_anchor():
 def test_file_explorer_is_movable_resizable_box():
     n = build_file_explorer_node()
     assert n.movable is True and n.resizable is True
+    assert n.configurable is True  # a un engrenage de réglages
     assert n.w and n.h  # taille par défaut (boîte)
+
+
+def test_kernel_is_not_configurable():
+    assert build_kernel_node().configurable is False
 
 
 def test_build_node_by_kind():

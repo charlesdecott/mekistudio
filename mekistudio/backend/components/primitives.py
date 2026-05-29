@@ -35,10 +35,14 @@ class FileTreeComponent(ComponentBase):
     """Explorateur de fichiers (style VSCode). Point de montage seulement : le
     contenu de l'arbre n'est PAS dans l'état — le front le charge paresseusement
     via /api/fs au fur et à mesure des dépliages (le FS change, donc pas de cache
-    dans canvas.json)."""
+    dans canvas.json).
+
+    `excludes` : noms de fichiers/dossiers masqués (config utilisateur, éditable
+    via la modale de réglages). Le front les passe à /api/fs."""
 
     type: Literal["filetree"] = "filetree"
     root_path: str = ""  # racine relative au repo (posix) ; "" = racine du repo
+    excludes: list[str] = Field(default_factory=lambda: ["__pycache__"])
 
 
 # Union discriminée : le champ `type` sélectionne la classe au parsing. C'est
@@ -53,3 +57,10 @@ Component = Annotated[
 # l'union `Component` définie dans le module.
 LayoutComponent.model_rebuild()
 NodeComponent.model_rebuild()
+
+
+def iter_components(component):
+    """Parcourt en profondeur un composant et tous ses descendants."""
+    yield component
+    for child in getattr(component, "children", None) or []:
+        yield from iter_components(child)

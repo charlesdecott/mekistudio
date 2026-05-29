@@ -23,6 +23,7 @@ def build_file_explorer_node(x: float = 300.0, y: float = 0.0) -> Node:
         y=y,
         w=300.0,
         h=380.0,
+        configurable=True,  # engrenage -> modale (gestion des exclusions)
         root=NodeComponent(
             children=[
                 LayoutComponent(

@@ -123,6 +123,59 @@ def test_viewport_rejects_non_finite(tmp_path):
     assert r.status_code == 422
 
 
+def test_fs_applies_excludes(tmp_path):
+    (tmp_path / "keep.py").write_text("x", encoding="utf-8")
+    (tmp_path / "secret").mkdir()
+    r = _client(tmp_path).get("/api/fs", params={"exclude": ["secret"]})
+    names = [e["name"] for e in r.json()["entries"]]
+    assert "keep.py" in names and "secret" not in names
+
+
+def test_settings_updates_excludes_and_persists(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(
+        f"/api/canvas/nodes/{ids['fileexplorer']}/settings",
+        json={"excludes": [" .git ", "node_modules", "node_modules", ""]},
+    )
+    assert r.status_code == 200
+    # GET /api/canvas : le FileTreeComponent porte les exclusions normalisées
+    nodes = client.get("/api/canvas").json()["nodes"]
+    fe = next(n for n in nodes if n["kind"] == "fileexplorer")
+    tree = fe["root"]["children"][0]["children"][1]
+    assert tree["type"] == "filetree"
+    assert tree["excludes"] == [".git", "node_modules"]  # trim + dédoublonné + sans vide
+
+
+def test_settings_on_non_configurable_is_422(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(
+        f"/api/canvas/nodes/{ids['kernel']}/settings", json={"excludes": ["x"]}
+    )
+    assert r.status_code == 422
+
+
+def test_settings_rejects_path_separator(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(
+        f"/api/canvas/nodes/{ids['fileexplorer']}/settings",
+        json={"excludes": ["src/foo"]},
+    )
+    assert r.status_code == 422
+
+
+def test_settings_rejects_too_many_excludes(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    r = client.post(
+        f"/api/canvas/nodes/{ids['fileexplorer']}/settings",
+        json={"excludes": [f"e{i}" for i in range(201)]},
+    )
+    assert r.status_code == 422
+
+
 def test_post_viewport_persists(tmp_path):
     client = _client(tmp_path)
     r = client.post("/api/canvas/viewport", json={"x": 12, "y": -3, "zoom": 2})

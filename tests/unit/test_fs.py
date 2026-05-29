@@ -38,9 +38,16 @@ def test_list_dir_rejects_non_dir(tmp_path):
         fs.list_dir(tmp_path, "f.txt")
 
 
-def test_list_dir_hides_pycache(tmp_path):
+def test_list_dir_excludes_hide_names(tmp_path):
     (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "node_modules").mkdir()
     (tmp_path / "real.py").write_text("x", encoding="utf-8")
-    names = [e.name for e in fs.list_dir(tmp_path)]
-    assert "__pycache__" not in names
+    names = [e.name for e in fs.list_dir(tmp_path, excludes=["__pycache__", "node_modules"])]
+    assert "__pycache__" not in names and "node_modules" not in names
     assert "real.py" in names
+
+
+def test_list_dir_without_excludes_hides_nothing(tmp_path):
+    (tmp_path / "__pycache__").mkdir()
+    names = [e.name for e in fs.list_dir(tmp_path)]
+    assert "__pycache__" in names  # plus de masquage hardcodé

@@ -30,6 +30,7 @@ def reconcile_constraints(state: CanvasState) -> CanvasState:
         tmpl = builder()
         node.movable = tmpl.movable
         node.resizable = tmpl.resizable
+        node.configurable = tmpl.configurable
         node.max_w = tmpl.max_w
         node.max_h = tmpl.max_h
     return state
