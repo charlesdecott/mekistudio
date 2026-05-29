@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -53,6 +54,37 @@ def serve(
     uvicorn.run(create_app(repo_root=root), host=host, port=port)
 
 
+def _schedule_reinstall(root: Path) -> bool:
+    """Reconstruit l'outil global `mekistudio` depuis la source `root`.
+
+    Sur Windows, le lanceur `mekistudio.exe` qui exécute *cette* commande
+    verrouille son propre fichier : `uv tool install` ne peut pas l'écraser
+    (os error 32). On délègue donc à un process **détaché** qui attend la
+    sortie du process courant, puis fait l'install — le swap se fait une fois
+    l'exe libéré.
+
+    Retourne True si la réinstallation est différée (asynchrone, Windows),
+    False si elle a été faite de façon synchrone (POSIX). Lève sur échec POSIX.
+    """
+    cmd = ["uv", "tool", "install", "--force", str(root)]
+
+    if sys.platform == "win32":
+        # PowerShell détaché : petite attente que l'exe courant se libère,
+        # puis install. Path en guillemets simples (pas d'échappement des \).
+        script = f"Start-Sleep -Seconds 2; uv tool install --force '{root}'"
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            creationflags=subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+        return True
+
+    if subprocess.run(cmd).returncode != 0:
+        raise RuntimeError("uv tool install a échoué")
+    return False
+
+
 @app.command()
 def update(
     repo: Path = typer.Option(
@@ -65,9 +97,9 @@ def update(
     """Met a jour l'install globale `mekistudio` depuis la source.
 
     Auto-upgrade : on (optionnellement) `git pull` la source, puis on
-    reconstruit l'outil global isole via `uv tool install --force`. Le swap
-    prend effet au prochain lancement (un .exe en cours ne peut etre ecrase) —
-    relance `mekistudio serve` apres.
+    reconstruit l'outil global isole via `uv tool install --force`. Sur Windows
+    le swap est differe (un .exe en cours ne peut etre ecrase) — relance
+    `mekistudio serve` apres.
     """
     root = repo.resolve() if repo else paths.find_repo_root(Path.cwd())
 
@@ -79,11 +111,20 @@ def update(
                 fg=typer.colors.YELLOW,
             )
 
-    typer.secho(f"[mekistudio] uv tool install --force {root}", fg=typer.colors.CYAN)
-    if subprocess.run(["uv", "tool", "install", "--force", str(root)]).returncode != 0:
-        typer.secho("[mekistudio] reconstruction echouee.", fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+    typer.secho(f"[mekistudio] reconstruction de l'outil global depuis {root}", fg=typer.colors.CYAN)
+    try:
+        deferred = _schedule_reinstall(root)
+    except Exception as exc:
+        typer.secho(f"[mekistudio] reconstruction echouee : {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
 
-    typer.secho(
-        "[mekistudio] a jour. Relance `mekistudio serve`.", fg=typer.colors.GREEN
-    )
+    if deferred:
+        typer.secho(
+            "[mekistudio] mise a jour planifiee en arriere-plan — relance "
+            "`mekistudio serve` dans ~5 s.",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.secho(
+            "[mekistudio] a jour. Relance `mekistudio serve`.", fg=typer.colors.GREEN
+        )
