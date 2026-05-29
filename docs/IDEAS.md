@@ -33,7 +33,8 @@ meubles » : invariant *zéro recouvrement* maintenu en continu.
 > après le passage ? la poussée se **propage-t-elle en chaîne** (cascade) quand
 > plusieurs nodes sont alignés ? s'applique-t-elle aussi au **redimensionnement**
 > et au **spawn** (aujourd'hui les éditeurs se chevauchent *volontairement* en
-> cascade — cf. `freeEditorPos`) ? le `kernel` figé fait office de **mur**.
+> cascade — cf. `openFileInNewEditor`/`editorPosAt`) ? le `kernel` figé fait
+> office de **mur**.
 
 ## Canvas — relier les nodes avec une logique (wires)
 
