@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import webbrowser
 from pathlib import Path
 
@@ -54,59 +53,20 @@ def serve(
     uvicorn.run(create_app(repo_root=root), host=host, port=port)
 
 
-def _schedule_reinstall(root: Path) -> bool:
-    """Reconstruit l'outil global `mekistudio` depuis la source `root`.
-
-    Sur Windows, le lanceur `mekistudio.exe` qui exécute *cette* commande
-    verrouille son propre fichier : `uv tool install` ne peut pas l'écraser
-    (os error 32). On délègue donc à un process **détaché** qui attend la
-    sortie du process courant, puis fait l'install — le swap se fait une fois
-    l'exe libéré.
-
-    Retourne True si la réinstallation est différée (asynchrone, Windows),
-    False si elle a été faite de façon synchrone (POSIX). Lève sur échec POSIX.
-    """
-    # --reinstall : sans lui, uv ressert un wheel en cache pour la même
-    # version et le nouveau code n'est jamais pris en compte.
-    cmd = ["uv", "tool", "install", "--reinstall", "--force", str(root)]
-
-    if sys.platform == "win32":
-        # PowerShell détaché : petite attente que l'exe courant se libère,
-        # puis install (sortie loggée). Path en guillemets simples (pas
-        # d'échappement des backslashes).
-        script = (
-            "Start-Sleep -Seconds 2; "
-            f"uv tool install --reinstall --force '{root}' "
-            '*> "$env:TEMP\\mekistudio-update.log"'
-        )
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            creationflags=subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
-        return True
-
-    if subprocess.run(cmd).returncode != 0:
-        raise RuntimeError("uv tool install a échoué")
-    return False
-
-
 @app.command()
 def update(
     repo: Path = typer.Option(
         None, help="Chemin du repo source (defaut : repo git courant)."
     ),
-    pull: bool = typer.Option(
-        True, "--pull/--no-pull", help="git pull avant de reconstruire."
-    ),
+    pull: bool = typer.Option(True, "--pull/--no-pull", help="git pull la source."),
 ) -> None:
-    """Met a jour l'install globale `mekistudio` depuis la source.
+    """Met a jour le studio depuis la source.
 
-    Auto-upgrade : on (optionnellement) `git pull` la source, puis on
-    reconstruit l'outil global isole via `uv tool install --force`. Sur Windows
-    le swap est differe (un .exe en cours ne peut etre ecrase) — relance
-    `mekistudio serve` apres.
+    L'outil global est installe en *editable* (`uv tool install --editable`) :
+    il lit le code en direct depuis le repo. Un `git pull` suffit donc — pas de
+    rebuild, pas d'exe a reecrire — et c'est pris en compte au prochain
+    `mekistudio serve`. Si les dependances (pyproject) ont change, relance
+    `uv tool install --editable --force .` studio arrete.
     """
     root = repo.resolve() if repo else paths.find_repo_root(Path.cwd())
 
@@ -114,24 +74,11 @@ def update(
         typer.secho(f"[mekistudio] git pull dans {root}", fg=typer.colors.CYAN)
         if subprocess.run(["git", "-C", str(root), "pull", "--ff-only"]).returncode != 0:
             typer.secho(
-                "[mekistudio] git pull a echoue (pas de remote ?) — on continue",
+                "[mekistudio] git pull a echoue (pas de remote / non fast-forward).",
                 fg=typer.colors.YELLOW,
             )
 
-    typer.secho(f"[mekistudio] reconstruction de l'outil global depuis {root}", fg=typer.colors.CYAN)
-    try:
-        deferred = _schedule_reinstall(root)
-    except Exception as exc:
-        typer.secho(f"[mekistudio] reconstruction echouee : {exc}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from exc
-
-    if deferred:
-        typer.secho(
-            "[mekistudio] mise a jour planifiee en arriere-plan — relance "
-            "`mekistudio serve` dans ~5 s. (log : %TEMP%\\mekistudio-update.log)",
-            fg=typer.colors.GREEN,
-        )
-    else:
-        typer.secho(
-            "[mekistudio] a jour. Relance `mekistudio serve`.", fg=typer.colors.GREEN
-        )
+    typer.secho(
+        "[mekistudio] a jour — pris en compte au prochain `mekistudio serve`.",
+        fg=typer.colors.GREEN,
+    )
