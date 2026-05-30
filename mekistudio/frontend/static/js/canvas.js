@@ -44,6 +44,8 @@ document.addEventListener('alpine:init', () => {
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
       this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
+      // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
+      document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
     },
     // Passe ordonnée déterministe : figés d'abord (murs), puis mobiles triés par id ;
     // chaque node placé devient obstacle pour les suivants. Persiste les déplacés.
@@ -85,6 +87,7 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.resizable = node.resizable !== false;
       wrap.dataset.configurable = node.configurable === true;
       wrap.dataset.source = node.source_id || ''; // graphe de câbles lu depuis le DOM
+      if (node.kind === 'fileeditor') wrap.dataset.file = (node.root && node.root.file_path) || '';
       this.applyBox(wrap, node);
       wrap.appendChild(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
@@ -480,16 +483,24 @@ document.addEventListener('alpine:init', () => {
       }
       return seen;
     },
-    // Impulsion debug : depuis fromId vers une cible ATTEIGNABLE aléatoire ; comète le long
-    // du chemin (nodes traversés -> glow doux, cible -> flash fort). Verrou anti-chevauchement.
+    // Impulsion debug : depuis fromId vers une cible ATTEIGNABLE aléatoire (délègue à pulseTo).
     async firePulse(fromId) {
-      if (this._pulsing) return;
       const boxes = this.nodeBoxes();
       const byId = {};
       boxes.forEach((info, id) => { byId[id] = { id, source: info.source || null }; });
       const targets = [...this.reachableFrom(byId, fromId)].filter((id) => id !== fromId);
-      if (!targets.length) return; // node isolé -> no-op
+      if (!targets.length) return;
       const toId = targets[Math.floor(Math.random() * targets.length)];
+      await this.pulseTo(fromId, toId, 'strong');
+    },
+
+    // Comète orientée fromId -> toId le long des câbles (pathBetween), nodes traversés en glow doux,
+    // cible au niveau `arrivalLevel`. Verrou anti-chevauchement partagé (_pulsing).
+    async pulseTo(fromId, toId, arrivalLevel) {
+      if (this._pulsing || !fromId || !toId || fromId === toId) return;
+      const boxes = this.nodeBoxes();
+      const byId = {};
+      boxes.forEach((info, id) => { byId[id] = { id, source: info.source || null }; });
       const path = window.MekiCables.pathBetween(byId, fromId, toId);
       if (!path || !path.length) return;
       this._pulsing = true;
@@ -497,10 +508,54 @@ document.addEventListener('alpine:init', () => {
         for (const seg of path) {
           await this.animateComet(seg);
           const arrived = seg.dir === 'up' ? seg.parentId : seg.childId;
-          if (arrived !== toId) this.glow(arrived, 'soft', 600); // node traversé
+          if (arrived !== toId) this.glow(arrived, 'soft', 600);
         }
-        this.glow(toId, 'strong', 1500); // cible : flash + rémanence
-      } finally { this._pulsing = false; }
+        this.glow(toId, arrivalLevel || 'strong', 1500);
+      } finally {
+        this._pulsing = false;
+      }
+    },
+
+    kindId(kind) {
+      const w = this.$root.querySelector('.node-wrap[data-kind="' + kind + '"]');
+      return w ? w.dataset.id : null;
+    },
+
+    editorIdForFile(filePath) {
+      const norm = (p) => (p || '').replace(/\\/g, '/').replace(/^\.\//, '');
+      const want = norm(filePath);
+      if (!want) return null;
+      const wraps = this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]');
+      for (const w of wraps) if (norm(w.dataset.file) === want) return w.dataset.id;
+      return null;
+    },
+
+    // Glow + clic sur le node = extinction (acquittement). Capture pour passer AVANT les
+    // stopPropagation internes du chat.
+    glowDismissable(id, level, ms) {
+      this.glow(id, level, ms);
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (!wrap) return;
+      const off = () => { this.clearGlow(id); wrap.removeEventListener('click', off, true); };
+      wrap.addEventListener('click', off, true);
+    },
+
+    // Exécute une intention d'impulsion (issue de MekiImpulses.impulseFor).
+    applyIntent(intent) {
+      if (!intent) return;
+      if (intent.kind === 'comet') {
+        const chatId = this.kindId('chat');
+        const toId = this.editorIdForFile(intent.target.value);
+        if (chatId && toId) { this.pulseTo(chatId, toId, intent.level === 'strong' ? 'strong' : 'soft'); return; }
+        if (intent.fallback) this.applyIntent(intent.fallback);
+        return;
+      }
+      const id = intent.target.by === 'kind' ? this.kindId(intent.target.value) : intent.target.value;
+      if (!id) return;
+      const ms = intent.level === 'notif' ? 0 : 1500; // soft=600 plus bas
+      const dur = intent.level === 'soft' ? 600 : ms;
+      if (intent.dismissable) this.glowDismissable(id, intent.level, dur);
+      else this.glow(id, intent.level, dur);
     },
     // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
     // Vitesse CONSTANTE (durée ∝ longueur, mouvement linéaire) : un câble long n'accélère pas.
@@ -568,7 +623,7 @@ document.addEventListener('alpine:init', () => {
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
       if (!wrap) return;
       if (this._glowTimers[id]) { clearTimeout(this._glowTimers[id]); delete this._glowTimers[id]; }
-      wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif');
+      wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif', 'glow-error');
       wrap.classList.add('glow-' + level);
       if (ms > 0) {
         this._glowTimers[id] = setTimeout(() => {
@@ -579,7 +634,7 @@ document.addEventListener('alpine:init', () => {
     clearGlow(id) {
       if (this._glowTimers[id]) { clearTimeout(this._glowTimers[id]); delete this._glowTimers[id]; }
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
-      if (wrap) wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif');
+      if (wrap) wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif', 'glow-error');
     },
     async persistNode(node) {
       try {
