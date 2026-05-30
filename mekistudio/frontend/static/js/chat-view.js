@@ -100,12 +100,18 @@
     send.type = 'button';
     send.textContent = '➤';
     composer.append(ta, send);
-    wrap.append(header, statusBar, list, chips, composer);
+    const hooksBar = el('div', 'chat-hooks');
+    const hooksHead = el('div', 'chat-hooks-head');
+    hooksHead.textContent = '🪝 hooks';
+    const hooksLog = el('div', 'chat-hooks-log');
+    hooksBar.append(hooksHead, hooksLog);
+    hooksHead.addEventListener('click', () => hooksBar.classList.toggle('open'));
+    wrap.append(header, statusBar, list, chips, hooksBar, composer);
     container.append(wrap);
 
     // ne pas laisser le node-wrap parent capter scroll/clic (zoom/move/select)
     [list, ta].forEach((e) => e.addEventListener('wheel', (ev) => ev.stopPropagation()));
-    [composer, header, statusBar, chips].forEach((e) =>
+    [composer, header, statusBar, chips, hooksBar].forEach((e) =>
       e.addEventListener('mousedown', (ev) => ev.stopPropagation())
     );
 
@@ -207,6 +213,17 @@
       }
       const intent = window.MekiImpulses && window.MekiImpulses.impulseFor(e);
       if (intent) document.dispatchEvent(new CustomEvent('meki:impulse', { detail: intent }));
+      if (ev.type === 'hook_fired') appendHook(ev);
+    }
+
+    function appendHook(ev) {
+      const d = ev.data || {};
+      const tool = d.tool_name || (d.tool_input && d.tool_input.file_path) || '';
+      const line = el('div', 'chat-hook-line');
+      line.textContent = '▸ ' + ev.name + (tool ? ' · ' + tool : '');
+      hooksLog.append(line);
+      while (hooksLog.childElementCount > 100) hooksLog.removeChild(hooksLog.firstChild); // borne
+      hooksLog.scrollTop = hooksLog.scrollHeight;
     }
 
     // --- WebSocket ---
