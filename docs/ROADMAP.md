@@ -44,7 +44,13 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   - **Création/suppression de nodes** : `POST /api/canvas/nodes` (kind, borné,
     rejet non-fini) · `DELETE /api/canvas/nodes/{id}` (built-in non supprimables).
     Clic = node au premier plan ; scrollbar discrète globale.
-  - Reste : câbles/wires entre nodes, WebSocket (multi-onglets), palette d'ajout.
+  - **Câbles/wires** (livré) : dérivés de `Node.source_id` (arbre kernel→explorer→éditeurs),
+    tracé **subway 45° adaptatif** + ruban néon, **contournement des nodes** (45° + changement
+    de face) et **anti-superposition** des câbles, re-route auto. *(Impulsions ⚡ : Phase 2 du
+    plan, non encore implémentée.)*
+  - **Anti-chevauchement des nodes** (livré) : invariant zéro-recouvrement, collision douce
+    (voisin écarté/relogé), kernel = mur, spawn dans un trou libre, réconciliation au boot.
+  - Reste : impulsions ⚡ (Phase 2 câbles), WebSocket (multi-onglets), palette d'ajout.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 
