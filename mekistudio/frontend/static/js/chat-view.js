@@ -118,18 +118,23 @@
         const body = el('div', 'chat-body');
         const name = el('div', 'chat-name');
         name.textContent = m.kind === 'user' ? 'charles' : m.kind === 'assistant' ? 'Claude' : 'erreur';
-        const content = el('div', 'chat-content');
-        if (m.kind === 'assistant' && m.status !== 'streaming') {
-          content.innerHTML = renderMarkdown(m.text);
+        const hasText = !!(m.text && m.text.length);
+        if (hasText || m.status === 'streaming' || m.kind !== 'assistant') {
+          const content = el('div', 'chat-content');
+          if (m.kind === 'assistant' && m.status !== 'streaming') {
+            content.innerHTML = renderMarkdown(m.text);  // markdown assaini pour le texte final
+          } else {
+            content.textContent = m.text || '';
+          }
+          if (m.status === 'streaming') {
+            content.append(el('span', 'chat-cursor'));
+            streamEl = content;
+            streamMid = m.message_id;
+          }
+          body.append(name, content);
         } else {
-          content.textContent = m.text || '';
+          body.append(name);  // bulle d'un groupe d'outils (texte vide) : en-tête seul, pas de ligne vide
         }
-        if (m.status === 'streaming') {
-          content.append(el('span', 'chat-cursor'));
-          streamEl = content;
-          streamMid = m.message_id;
-        }
-        body.append(name, content);
         if (m.status === 'interrupted') body.append(el('div', 'chat-interrupted'));
         if (m.kind === 'assistant') {
           const tools = renderTools(m, state.toolsById);
