@@ -1,6 +1,18 @@
 from mekistudio.backend.chat import events
 
 
+def test_hook_turn_attached_are_transient():
+    hf = events.hook_fired("PostToolUse", {"tool_name": "Read"})
+    te = events.turn_end("success")
+    at = events.attached()
+    assert hf == {"type": "hook_fired", "name": "PostToolUse", "data": {"tool_name": "Read"}}
+    assert te == {"type": "turn_end", "status": "success"}
+    assert at == {"type": "attached"}
+    # transients : JAMAIS persistés (pas de seq attribué par le store)
+    for t in ("hook_fired", "turn_end", "attached"):
+        assert t not in events.DURABLE_TYPES
+
+
 def test_durable_and_transient_builders():
     um = events.user_message("salut")
     assert um == {"type": "user_message", "ts": um["ts"], "text": "salut"} and isinstance(um["ts"], int)

@@ -61,3 +61,17 @@ def tool_use(id: str, name: str, input: dict) -> dict:
 
 def tool_result(id: str, output: str, is_error: bool) -> dict:
     return {"type": "tool_result", "ts": now_ms(), "id": id, "output": output, "is_error": is_error}
+
+
+# --- hooks & fin de tour (transients, wire only ; brique F) ---
+def hook_fired(name: str, data: dict) -> dict:
+    return {"type": "hook_fired", "name": name, "data": data}
+
+
+def turn_end(status: str) -> dict:
+    return {"type": "turn_end", "status": status}
+
+
+def attached() -> dict:
+    # marqueur de fin de replay : les events APRÈS sont 'live' -> le front déclenche les impulsions
+    return {"type": "attached"}
