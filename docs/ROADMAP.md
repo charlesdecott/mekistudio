@@ -64,9 +64,18 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     deltas **non** journalisés). Outils **OFF**. Bridge détaché (`backend/chat/`), API SDK
     épinglée par un smoke test. Spec/plan/revue adversariale (52 findings) :
     `docs/superpowers/{specs,plans}/2026-05-30-node-chat-claude-skeleton*`.
-  - Reste sur le chat : **tool-cards** (réactiver les outils), **hooks → impulsions** (les
-    rendre « réelles »), **QCM / `ask_user`** (validation), **panneau hooks**, thinking. Et
-    ailleurs : palette d'ajout, multi-onglets.
+  - **Tool-cards lecture seule** (livré, 2026-05-30, brique D) : outils **Read/Glob/Grep/LS**
+    rallumés, **confinés au repo** par un hook `PreToolUse` durci (le `claude` ne peut rien lire
+    hors du dossier — prouvé en smoke réel). Tour **multi-étapes** (chaque `AssistantMessage` =
+    une étape), **tool-cards mode C** (log terminal : icône+couleur par outil, état ⟳/✓/✗/🚫,
+    sortie dépliable), appariées par `tool_use_id`, persistées+rejouées ; **balayage des outils
+    orphelins** à l'interrupt. Validé Playwright (Read CLAUDE.md → carte, 0 erreur console).
+    Spec/plan/revue : `docs/superpowers/{specs,plans}/2026-05-30-node-chat-tool-cards*` ;
+    3 modes de carte (A/B/C) dans `docs/tool-card-styles.md`.
+  - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
+    `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **hooks →
+    impulsions** · **QCM / `ask_user`** · **panneau hooks** · modes de carte A/B en réglages.
+    Ailleurs : palette d'ajout, multi-onglets.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 

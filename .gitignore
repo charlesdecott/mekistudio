@@ -9,6 +9,12 @@ __pycache__/
 out.log
 err.log
 
+# Playwright (outil de validation front, non versionné)
+node_modules/
+package.json
+package-lock.json
+scripts/.pw/
+
 # Claude: on versionne settings.json (plugins activés), pas les artefacts runtime
 .claude/*
 !.claude/settings.json
