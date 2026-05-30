@@ -54,3 +54,27 @@ test('queued met à jour la file ; error crée une bulle', () => {
   assert.equal(s.messages.at(-1).kind, 'error');
   assert.equal(s.lastSeq, 9);
 });
+
+test('tool_use crée une carte running rattachée à l étape, tool_result la ferme, dédup seq', () => {
+  let s = MekiChat.createState();
+  s = MekiChat.reduce(s, { type: 'message_start', message_id: 'm1' });
+  s = MekiChat.reduce(s, { type: 'message_stop', message_id: 'm1', seq: 1, status: 'success' });
+  s = MekiChat.reduce(s, { type: 'tool_use', seq: 2, id: 'X', name: 'Read', input: { file_path: 'a.py' } });
+  assert.equal(s.toolsById['X'].status, 'running');
+  assert.ok(s.messages.at(-1).tools.includes('X'));
+  s = MekiChat.reduce(s, { type: 'tool_result', seq: 3, id: 'X', output: '73 l.', is_error: false });
+  assert.equal(s.toolsById['X'].status, 'done');
+  assert.equal(s.toolsById['X'].output, '73 l.');
+  // replay du même tool_result (même seq) -> idempotent
+  s = MekiChat.reduce(s, { type: 'tool_result', seq: 3, id: 'X', output: '73 l.', is_error: false });
+  assert.equal(s.toolsById['X'].status, 'done');
+});
+
+test('tool_result is_error -> status error', () => {
+  let s = MekiChat.createState();
+  s = MekiChat.reduce(s, { type: 'message_start', message_id: 'm1' });
+  s = MekiChat.reduce(s, { type: 'message_stop', message_id: 'm1', seq: 1, status: 'success' });
+  s = MekiChat.reduce(s, { type: 'tool_use', seq: 2, id: 'Y', name: 'Read', input: {} });
+  s = MekiChat.reduce(s, { type: 'tool_result', seq: 3, id: 'Y', output: 'interrompu', is_error: true });
+  assert.equal(s.toolsById['Y'].status, 'error');
+});
