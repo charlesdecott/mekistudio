@@ -17,6 +17,7 @@ document.addEventListener('alpine:init', () => {
     settingsNode: null,
     _settingsTree: null,
     _editors: {},            // états des nodes éditeur, indexés par node id
+    _chatViews: {},          // handles des vues chat (WS), indexés par node id
     _zTop: 0,                // dernier z-index attribué (premier plan au clic)
     panning: false,
     last: { x: 0, y: 0 },
@@ -69,6 +70,10 @@ document.addEventListener('alpine:init', () => {
     renderNodes(nodes) {
       const world = this.$root.querySelector('.world');
       if (!world) return;
+      // détruire les vues chat existantes AVANT de remplacer le DOM (sinon WS + timer
+      // de backoff fuient vers un DOM détaché — cas du boot/reload).
+      Object.values(this._chatViews).forEach((v) => v && v.destroy());
+      this._chatViews = {};
       world.replaceChildren(...nodes.map((n) => this.renderNode(n)));
     },
     renderNode(node) {
@@ -678,6 +683,7 @@ document.addEventListener('alpine:init', () => {
     rerenderNode(node) {
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + node.id + '"]');
       if (!wrap) return;
+      if (this._chatViews[node.id]) { this._chatViews[node.id].destroy(); delete this._chatViews[node.id]; }
       wrap.replaceChildren(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
     },
@@ -890,11 +896,28 @@ document.addEventListener('alpine:init', () => {
         this.mountEditor(el, c, node);
         return el;
       }
+      if (c.type === 'chat') {
+        const el = document.createElement('div');
+        el.className = 'cmp-chat-host';
+        this.mountChat(el, c, node);
+        return el;
+      }
       // type inconnu : fallback visuel plutôt qu'un trou silencieux
       const el = document.createElement('div');
       el.className = 'cmp-unknown';
       el.textContent = c.type;
       return el;
+    },
+
+    // Monte la vue chat (window.MekiChatView) et l'indexe par node id pour pouvoir
+    // la détruire (fermer la WS) au re-render / retrait (renderNodes/rerenderNode).
+    mountChat(host, comp, node) {
+      if (!window.MekiChatView || !window.MekiChat) {
+        host.textContent = 'Chat indisponible (scripts non chargés).';
+        return;
+      }
+      const view = window.MekiChatView.mount(host, comp.conversation_id, comp);
+      if (node && node.id) this._chatViews[node.id] = view;
     },
 
     // --- explorateur de fichiers (chargement paresseux via /api/fs) ---
