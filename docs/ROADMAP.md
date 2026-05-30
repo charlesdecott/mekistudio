@@ -46,11 +46,15 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     Clic = node au premier plan ; scrollbar discrète globale.
   - **Câbles/wires** (livré) : dérivés de `Node.source_id` (arbre kernel→explorer→éditeurs),
     tracé **subway 45° adaptatif** + ruban néon, **contournement des nodes** (45° + changement
-    de face) et **anti-superposition** des câbles, re-route auto. *(Impulsions ⚡ : Phase 2 du
-    plan, non encore implémentée.)*
+    de face) et **anti-superposition** des câbles, re-route auto.
+  - **Impulsions ⚡** (livré, debug) : mini-toolbar ⚡ sous le node sélectionné → **comète** le
+    long du chemin (`pathBetween` sur l'arbre `source_id`), nodes traversés en glow doux, cible
+    en flash fort. Simulateur en attendant le node chat (alors `AgentEnd` déclenchera la vraie
+    impulsion chat → éditeur).
   - **Anti-chevauchement des nodes** (livré) : invariant zéro-recouvrement, collision douce
     (voisin écarté/relogé), kernel = mur, spawn dans un trou libre, réconciliation au boot.
-  - Reste : impulsions ⚡ (Phase 2 câbles), WebSocket (multi-onglets), palette d'ajout.
+  - Reste : WebSocket (multi-onglets), palette d'ajout, et le **node chat** (ClaudeBridge)
+    qui rendra les impulsions « réelles ».
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 
