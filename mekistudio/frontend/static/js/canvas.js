@@ -309,7 +309,10 @@ document.addEventListener('alpine:init', () => {
             if (w.dataset.movable === 'false') { this.clearTranslate(w); obstacles.push(home); continue; }
             if (C.intersects(finalA, home, C.GAP)) {
               const others = obstacles.concat(wraps.filter((o) => o !== w).map((o) => this._homeBox(o)));
-              const spot = C.findFreeSpot(home, { w: home.w, h: home.h }, others, C.GAP);
+              const pushed = this.boxOf(w);   // là où il a DÉJÀ été poussé pendant le drag
+              const spot = C.isFree(pushed, others, C.GAP)
+                ? { x: pushed.x, y: pushed.y }                               // reste où il a été poussé
+                : C.findFreeSpot(home, { w: home.w, h: home.h }, others, C.GAP); // sinon, 1er trou libre
               this.clearTranslate(w);
               w.style.left = spot.x + 'px'; w.style.top = spot.y + 'px';
               obstacles.push({ x: spot.x, y: spot.y, w: home.w, h: home.h });
