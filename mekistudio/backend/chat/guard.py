@@ -7,6 +7,7 @@ guard ne lève JAMAIS (tout doute = deny). `{}` = laisse l'in-repo passer (auto-
 `allowed_tools`)."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 # Outil -> champ principal portant un chemin
@@ -16,6 +17,16 @@ READ_TOOLS = {"Read": "file_path", "LS": "path", "Glob": "path", "Grep": "path"}
 EXTRA_PATH = {"Glob": ["pattern"], "Grep": ["glob"]}
 # Outils où le chemin principal est optionnel (absent -> défaut = cwd = repo, sûr car cwd fixé)
 PATH_OPTIONAL = {"Glob", "Grep"}
+# Champs qui sont des PATTERNS de glob : le moteur du SDK EXPANSE les accolades AVANT résolution,
+# donc `{..,ok}/**` énumère hors-repo. `_inside` (résolution littérale via pathlib) ne le voit pas
+# -> ces champs passent par `_glob_inside` (deny tout `..`, et _inside sur chaque arm expansé).
+GLOB_PATTERN_FIELDS = {"pattern", "glob"}
+
+# IMPORTANT : `_inside`/`_glob_inside` ne gardent que les CHEMINS DÉCLARÉS. La TRAVERSÉE d'un dossier
+# in-repo par Glob/Grep (expansion `**`) suivant une junction/symlink SORTANTE plantée dans le repo
+# n'est PAS gardée ici (elle dépend du moteur SDK) — hypothèse de confinement : aucun lien sortant
+# n'est introduit dans le repo (brique lecture seule : l'agent ne peut pas en créer). Read, lui, est
+# sûr : `resolve()` suit le lien et atterrit hors-repo -> deny.
 
 
 def _inside(root: Path, candidate) -> bool:
@@ -26,6 +37,27 @@ def _inside(root: Path, candidate) -> bool:
         return True
     except (ValueError, TypeError, OSError):
         return False
+
+
+def _expand_braces(p: str) -> list[str]:
+    """Expanse récursivement les accolades comme le moteur glob (`{a,b}` -> `a`,`b`)."""
+    m = re.search(r"\{([^{}]*)\}", p)
+    if not m:
+        return [p]
+    pre, post = p[: m.start()], p[m.end() :]
+    out: list[str] = []
+    for arm in m.group(1).split(","):
+        out.extend(_expand_braces(pre + arm + post))
+    return out
+
+
+def _glob_inside(root: Path, pattern) -> bool:
+    """Confinement d'un PATTERN de glob, robuste à l'expansion des accolades."""
+    if not isinstance(pattern, str) or pattern == "":
+        return False
+    if ".." in pattern:  # tout '..' (même piégé dans `{..,x}`) = remontée potentielle -> deny
+        return False
+    return all(_inside(root, arm) for arm in _expand_braces(pattern))
 
 
 def _deny(msg: str) -> dict:
@@ -55,7 +87,8 @@ def make_repo_guard(repo_root: Path):
             val = tool_input.get(field)
             if val in (None, ""):
                 continue
-            if not _inside(root, val):
+            check = _glob_inside if field in GLOB_PATTERN_FIELDS else _inside
+            if not check(root, val):
                 return _deny(f"« {val} » ({field}) est hors du dossier du projet.")
         return {}
 

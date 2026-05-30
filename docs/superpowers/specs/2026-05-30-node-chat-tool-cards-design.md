@@ -113,7 +113,9 @@ Confirmé par la recherche (et **figé** par le smoke) : `tools=[…]` restreint
 - 🛡️ **`can_use_tool` court-circuité** : **résolu** en passant au hook `PreToolUse` (s'exécute pour tous les appels).
 - 🛡️ **`ToolResultBlock.content`** `str`/`list[dict]`/`None` : coercion `_tool_output` → `str` (D4).
 - **Smoke** doit prouver : in-repo passe **sans popup/hang** ; hors-repo **deny** ; guard **appelé**. Repo tmp + `setting_sources=[]` (isolation).
-- **Windows** : `\` vs `/`, casse, lecteurs (`C:` vs `D:`) → `resolve().relative_to(root)` ; symlink hors-repo suivi par `resolve()` → **deny** (invariant testé).
+- **Windows** : `\` vs `/`, casse, lecteurs (`C:` vs `D:`) → `resolve().relative_to(root)`.
+- **Confinement des PATTERNS de glob** (`Glob.pattern`, `Grep.glob`) : le moteur du SDK **expanse les accolades** avant résolution, donc `{..,ok}/**` énumère hors-repo alors que le pattern littéral « résout » in-repo. Ces champs passent par `_glob_inside` (deny tout `..`, et `_inside` sur **chaque arm** expansé), pas `_inside`.
+- **Symlinks/junctions** : un lien fourni comme **chemin déclaré** (`file_path`/`path`) est sûr — `resolve()` le suit et `relative_to(root)` → **deny** s'il sort. En revanche la **traversée** d'un dossier in-repo par `Glob`/`Grep` (expansion `**`) suivant une junction **sortante** plantée dans le repo n'est **pas** gardée par le hook (elle dépend du moteur SDK) ; hypothèse de confinement : aucun lien sortant n'est introduit dans le repo (brique lecture seule → l'agent ne peut pas en créer).
 - **output volumineux** (gros Read/Grep) : tronqué (borne) avant persistance/affichage.
 
 ## 7. Tests
