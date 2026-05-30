@@ -11,6 +11,13 @@
   <!-- géométries pures (window.MekiCables / MekiCollision) — avant canvas.js qui les utilise. -->
   <script defer src="/static/js/cables.js"></script>
   <script defer src="/static/js/collision.js"></script>
+  <!-- chat : markdown assaini + réducteur pur + vue, AVANT canvas.js et AVANT Alpine.
+       Les `defer` s'exécutent dans l'ordre du document -> window.marked/DOMPurify/MekiChat
+       /MekiChatView sont prêts au 1er rendu de la branche chat de renderComponent. -->
+  <script defer src="/static/vendor/marked.min.js"></script>
+  <script defer src="/static/vendor/purify.min.js"></script>
+  <script defer src="/static/js/chat-model.js"></script>
+  <script defer src="/static/js/chat-view.js"></script>
   <script defer src="/static/js/canvas.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <!-- éditeur CodeMirror : module ESM, expose window.MekiEditor (chargé en async). -->
