@@ -53,8 +53,20 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     impulsion chat → éditeur).
   - **Anti-chevauchement des nodes** (livré) : invariant zéro-recouvrement, collision douce
     (voisin écarté/relogé), kernel = mur, spawn dans un trou libre, réconciliation au boot.
-  - Reste : WebSocket (multi-onglets), palette d'ajout, et le **node chat** (ClaudeBridge)
-    qui rendra les impulsions « réelles ».
+  - **Node chat × Claude Agent SDK — squelette vertical** (livré, 2026-05-30) : node chat
+    **built-in** piloté par une vraie session Claude (Claude Agent SDK, **mode streaming-input**),
+    réponses **texte streamées token-par-token** dans des bulles **Discord-fidèles**
+    (`chat-view.js` + réducteur **pur** `chat-model.js`, testé `node --test`). **WebSocket**
+    `/ws/chat/{conversation_id}` (1ʳᵉ brique temps réel), session **détachée façon `screen`**
+    (survit au reload, **reattach** = replay + live), **stop** (`interrupt()`), **file
+    d'attente**, **nouvelle session** (clear). Persistance disque
+    (`.mekistudio/conversations/<id>/` : `meta.json` + `messages.jsonl`, records discrets ;
+    deltas **non** journalisés). Outils **OFF**. Bridge détaché (`backend/chat/`), API SDK
+    épinglée par un smoke test. Spec/plan/revue adversariale (52 findings) :
+    `docs/superpowers/{specs,plans}/2026-05-30-node-chat-claude-skeleton*`.
+  - Reste sur le chat : **tool-cards** (réactiver les outils), **hooks → impulsions** (les
+    rendre « réelles »), **QCM / `ask_user`** (validation), **panneau hooks**, thinking. Et
+    ailleurs : palette d'ajout, multi-onglets.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
 
@@ -76,11 +88,12 @@ des **nodes composés de briques modulaires** plutôt qu'un canvas monolithique.
 1. **Système de nodes/briques minimal** — un `registry`, un modèle `Node` typé,
    le rendu d'un node sur le canvas (brancher le seam `nodes`). Réf :
    `docs/old/mekistudio-lego/01-brick-system.md`, `03-canvas-runtime.md`.
-2. **Premier vrai node : chat** — connecter le **ClaudeBridge** (Claude Agent
-   SDK) : streaming des tokens, panneau de hooks. Réf :
+2. **Premier vrai node : chat** — ✅ **squelette livré** (streaming texte, WebSocket,
+   screen/reattach, stop/file/nouvelle session, outils OFF). Reste : **tool-cards**,
+   **panneau de hooks**, **hooks → impulsions**, **QCM**. Réf :
    `docs/old/mekistudio/04-claude-bridge.md`.
-3. **Persistance des conversations** — `meta.json` + `messages.jsonl` +
-   `hooks.jsonl` sous `.mekistudio/`. Réf : `docs/old/mekistudio/03-state-on-disk.md`.
+3. **Persistance des conversations** — ✅ `meta.json` + `messages.jsonl` (squelette chat).
+   Reste : `hooks.jsonl` (avec la brique hooks). Réf : `docs/old/mekistudio/03-state-on-disk.md`.
 4. **Nodes git** (status / diff) + **pulses** chat ↔ git. Réf :
    `docs/old/mekistudio/05-canvas.md`, `docs/old/mekistudio-lego/02-node-catalog.md`.
 5. **Worktrees git** par branche, état isolé. Réf :
