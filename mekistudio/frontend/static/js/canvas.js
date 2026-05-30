@@ -24,6 +24,9 @@ document.addEventListener('alpine:init', () => {
     _saveTimer: null,
     _dragDir: { x: 0, y: 0 }, // vecteur cumulatif saisie->curseur (sens du drag pour la collision)
     _pendingSpots: [],       // spots d'éditeurs réservés (spawns concurrents)
+    _toolbar: null,          // mini-toolbar ⚡ du node sélectionné
+    _pulsing: false,         // une impulsion est en vol (verrou)
+    _glowTimers: {},         // id -> timeout d'extinction du glow
 
     async init() {
       let state = {};
@@ -434,6 +437,118 @@ document.addEventListener('alpine:init', () => {
       // z-index scopé au stacking context de .world (transform) -> jamais au-dessus
       // de la toolbar/HUD/modale.
       wrap.style.zIndex = ++this._zTop;
+      if (this.tool === 'select') this.showToolbar(wrap); // ⚡ debug en mode sélection
+    },
+    // Mini-toolbar (⚡) sous le node sélectionné — élément frère dans .world.
+    showToolbar(wrap) {
+      this.hideToolbar();
+      const world = this.$root.querySelector('.world');
+      if (!world) return;
+      const bar = document.createElement('div');
+      bar.className = 'node-toolbar';
+      bar.style.left = (parseFloat(wrap.style.left) || 0) + 'px';
+      bar.style.top = ((parseFloat(wrap.style.top) || 0) + wrap.offsetHeight + 8) + 'px';
+      const id = wrap.dataset.id;
+      const zap = document.createElement('button');
+      zap.type = 'button'; zap.className = 'node-toolbar-btn'; zap.textContent = '⚡';
+      zap.title = 'Envoyer une impulsion (debug)';
+      zap.addEventListener('mousedown', (e) => e.stopPropagation());
+      zap.addEventListener('click', (e) => { e.stopPropagation(); this.firePulse(id); });
+      bar.appendChild(zap);
+      world.appendChild(bar);
+      this._toolbar = bar;
+    },
+    hideToolbar() { if (this._toolbar) { this._toolbar.remove(); this._toolbar = null; } },
+    // Nodes atteignables depuis startId (adjacence NON orientée via source_id).
+    reachableFrom(byId, startId) {
+      const adj = {};
+      Object.values(byId).forEach((n) => {
+        if (n.source && byId[n.source]) {
+          (adj[n.id] = adj[n.id] || []).push(n.source);
+          (adj[n.source] = adj[n.source] || []).push(n.id);
+        }
+      });
+      const seen = new Set([startId]), q = [startId];
+      while (q.length) {
+        const c = q.shift();
+        (adj[c] || []).forEach((nb) => { if (!seen.has(nb)) { seen.add(nb); q.push(nb); } });
+      }
+      return seen;
+    },
+    // Impulsion debug : depuis fromId vers une cible ATTEIGNABLE aléatoire ; comète le long
+    // du chemin (nodes traversés -> glow doux, cible -> flash fort). Verrou anti-chevauchement.
+    async firePulse(fromId) {
+      if (this._pulsing) return;
+      const boxes = this.nodeBoxes();
+      const byId = {};
+      boxes.forEach((info, id) => { byId[id] = { id, source: info.source || null }; });
+      const targets = [...this.reachableFrom(byId, fromId)].filter((id) => id !== fromId);
+      if (!targets.length) return; // node isolé -> no-op
+      const toId = targets[Math.floor(Math.random() * targets.length)];
+      const path = window.MekiCables.pathBetween(byId, fromId, toId);
+      if (!path || !path.length) return;
+      this._pulsing = true;
+      try {
+        for (const seg of path) {
+          await this.animateComet(seg);
+          const arrived = seg.dir === 'up' ? seg.parentId : seg.childId;
+          if (arrived !== toId) this.glow(arrived, 'soft', 600); // node traversé
+        }
+        this.glow(toId, 'strong', 1500); // cible : flash + rémanence
+      } finally { this._pulsing = false; }
+    },
+    // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
+    animateComet(seg) {
+      return new Promise((resolve) => {
+        const svg = this.ensureCablesLayer();
+        const g = svg && svg.querySelector('g[data-edge="' + seg.childId + '"]');
+        const path = g && g.querySelector('.cable-core');
+        if (!path) return resolve();
+        const len = path.getTotalLength();
+        const NS = 'http://www.w3.org/2000/svg';
+        const dot = document.createElementNS(NS, 'circle');
+        dot.setAttribute('class', 'comet'); dot.setAttribute('r', '5.5'); svg.appendChild(dot);
+        const trail = [];
+        for (let i = 0; i < 14; i++) {
+          const c = document.createElementNS(NS, 'circle');
+          c.setAttribute('class', 'comet-trail'); c.setAttribute('r', (5 - i * 0.3).toFixed(1));
+          c.setAttribute('opacity', (0.55 * (1 - i / 14)).toFixed(2)); svg.appendChild(c); trail.push(c);
+        }
+        const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+        const dur = 850; let start = null;
+        const step = (ts) => {
+          if (start === null) start = ts;
+          const t = Math.min(1, (ts - start) / dur), e = ease(t);
+          const at = seg.dir === 'up' ? e * len : (1 - e) * len; // sens du flux
+          const p = path.getPointAtLength(at);
+          dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
+          trail.forEach((c, i) => {
+            const back = seg.dir === 'up' ? Math.max(0, at - (i + 1) * 11) : Math.min(len, at + (i + 1) * 11);
+            const q = path.getPointAtLength(back); c.setAttribute('cx', q.x); c.setAttribute('cy', q.y);
+          });
+          if (t < 1) requestAnimationFrame(step);
+          else { dot.remove(); trail.forEach((c) => c.remove()); resolve(); }
+        };
+        requestAnimationFrame(step);
+      });
+    },
+    // Allume un node. ms>0 : retrait auto (fondu CSS) ; ms=0 : persistant (notif).
+    glow(id, level, ms) {
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (!wrap) return;
+      if (this._glowTimers[id]) { clearTimeout(this._glowTimers[id]); delete this._glowTimers[id]; }
+      wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif');
+      wrap.classList.add('glow-' + level);
+      if (ms > 0) {
+        this._glowTimers[id] = setTimeout(() => {
+          wrap.classList.remove('glow-' + level); delete this._glowTimers[id];
+        }, ms);
+      }
+    },
+    clearGlow(id) {
+      if (this._glowTimers[id]) { clearTimeout(this._glowTimers[id]); delete this._glowTimers[id]; }
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (wrap) wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif');
     },
     async persistNode(node) {
       try {
@@ -648,7 +763,9 @@ document.addEventListener('alpine:init', () => {
       if (state.handle) state.handle.destroy();   // libère l'EditorView
       const wrap = state.nodeId
         && this.$root.querySelector('.node-wrap[data-id="' + state.nodeId + '"]');
+      this.clearGlow(state.nodeId);
       if (wrap) wrap.remove();
+      if (this.selectedId === state.nodeId) { this.hideToolbar(); this.selectedId = null; }
       this.drawCables(); // le câble disparaît avec le node source retiré
     },
     // Double-clic sur un fichier -> spawn un NOUVEAU node éditeur près de
@@ -863,7 +980,13 @@ document.addEventListener('alpine:init', () => {
              `scale(${this.view.zoom});`;
     },
 
-    startPan(e) { this.panning = true; this.last = { x: e.clientX, y: e.clientY }; },
+    startPan(e) {
+      // clic sur le fond vide : désélectionne + cache la mini-toolbar
+      this.hideToolbar();
+      this.$root.querySelectorAll('.node-wrap.selected').forEach((n) => n.classList.remove('selected'));
+      this.selectedId = null;
+      this.panning = true; this.last = { x: e.clientX, y: e.clientY };
+    },
     onPan(e) {
       if (!this.panning) return;
       this.view.x += e.clientX - this.last.x;

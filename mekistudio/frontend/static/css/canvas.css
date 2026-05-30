@@ -220,5 +220,25 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .cable.cable-default .cable-halo, .cable.cable-default .cable-core { stroke: #8893a7; }
 
 /* --- Anti-collision : ecart/retour anime via transform --- */
-.node-wrap { transition: transform .12s ease-out; }
+.node-wrap { transition: transform .12s ease-out, box-shadow .3s ease; }
 .node-wrap.dragging { transition: none; } /* le node tenu ne traine pas son transform */
+
+/* --- Impulsions : mini-toolbar, comete, glows --- */
+.node-toolbar {
+  position: absolute; display: flex; gap: 6px; padding: 4px 6px;
+  background: #11141a; border: 1px solid #262d3a; border-radius: 8px; z-index: 7;
+}
+.node-toolbar-btn {
+  background: #1c2330; color: #cdb6ff; border: 1px solid #7c4dff;
+  border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 13px; line-height: 1.4;
+}
+.node-toolbar-btn:hover { background: #2a2150; }
+.comet { fill: #fff7da; }
+.comet-trail { fill: #ffce6e; }
+.node-wrap.glow-soft   { box-shadow: 0 0 12px 2px rgba(255, 210, 122, .45); }
+.node-wrap.glow-strong { box-shadow: 0 0 26px 6px rgba(255, 210, 122, .95); }
+.node-wrap.glow-notif  { animation: meki-notif 1.25s ease-in-out infinite; }
+@keyframes meki-notif {
+  0%, 100% { box-shadow: 0 0 10px 2px rgba(255, 210, 122, .40); }
+  50%      { box-shadow: 0 0 24px 6px rgba(255, 210, 122, .95); }
+}
