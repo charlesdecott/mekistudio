@@ -21,6 +21,41 @@
     return d.innerHTML;
   }
 
+  // Tool-cards mode C (log terminal) — palette partagée (docs/tool-card-styles.md).
+  const TOOL_META = {
+    Read: { icon: '📄', c: '#4d8dff' }, Glob: { icon: '🔍', c: '#b388ff' },
+    Grep: { icon: '🔎', c: '#b388ff' }, LS: { icon: '📁', c: '#8893a7' },
+  };
+  const STATUS = { running: '⟳', done: '✓', error: '✗' };
+
+  function fileArg(t) {
+    const i = t.input || {};
+    return i.file_path || i.pattern || i.path || '';
+  }
+
+  // Construit le bloc « console » des outils d'une bulle assistant (lignes mono, dépliables).
+  function renderTools(message, toolsById) {
+    const ids = (message.tools || []).filter((id) => toolsById[id]);
+    if (!ids.length) return null;
+    const box = el('div', 'chat-tools');
+    for (const id of ids) {
+      const t = toolsById[id];
+      const meta = TOOL_META[t.name] || { icon: '🔧', c: '#8893a7' };
+      const line = el('div', 'chat-tool' + (t.status === 'error' ? ' err' : ''));
+      const head = el('div', 'chat-tool-head');
+      const ico = el('span'); ico.textContent = meta.icon + ' ';
+      const nm = el('b'); nm.textContent = t.name; nm.style.color = meta.c;
+      const arg = el('span', 'arg'); arg.textContent = ' ' + fileArg(t);
+      const st = el('span', 'st'); st.textContent = ' ' + (STATUS[t.status] || '⟳');
+      head.append(ico, nm, arg, st);
+      const out = el('div', 'out'); out.textContent = t.output || '';
+      head.addEventListener('click', () => line.classList.toggle('open'));
+      line.append(head, out);
+      box.append(line);
+    }
+    return box;
+  }
+
   function mount(container, conversationId, component) {
     const MekiChat = window.MekiChat;
     let convId = conversationId;
@@ -96,6 +131,10 @@
         }
         body.append(name, content);
         if (m.status === 'interrupted') body.append(el('div', 'chat-interrupted'));
+        if (m.kind === 'assistant') {
+          const tools = renderTools(m, state.toolsById);
+          if (tools) body.append(tools);
+        }
         row.append(avatar, body);
         list.append(row);
       }
