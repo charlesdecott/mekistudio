@@ -7,7 +7,8 @@ AI dev studio en **pur Python, sans Docker, auto-hébergé** : un seul repo (`C:
 - Stack : uv · Typer · FastAPI/uvicorn · Jinja2 · Alpine.js · Pydantic v2 · Claude Agent SDK · pytest.
 - CLI : `serve` (canvas sur :8777, bootstrap `.mekistudio/`) · `update` (git pull, code live) · `update --restart` (stop + pull + relance).
 - Install global **editable** (`uv tool install --editable .`) → le code est lu en direct depuis le repo.
-- Composants : `backend/components/` (primitives Pydantic, union discriminée sur `type`) assemblés en nodes dans `backend/nodes/` (`registry.py` → `NODE_BUILDERS`/`default_canvas`). `CanvasState.nodes` typé `list[Node]` ; `edges` reste `list[dict]` (pas encore de wires).
+- Composants : `backend/components/` (primitives Pydantic, union discriminée sur `type`) assemblés en nodes dans `backend/nodes/` (`registry.py` → `NODE_BUILDERS`/`default_canvas`). `CanvasState.nodes` typé `list[Node]`.
+- Câbles/wires **dérivés** d'un parent par node (`Node.source_id` : arbre kernel→explorer→éditeurs ; `reconcile_source_links` au boot). Pas d'`edges` persistés (`CanvasState.edges` réservé/inutilisé). Le front a deux géométries **pures** (script classique, testées `node --test`) : `frontend/static/js/cables.js` (`window.MekiCables` — routage subway 45° adaptatif, ruban, contournement, impulsions/`pathBetween`) et `frontend/static/js/collision.js` (`window.MekiCollision` — anti-chevauchement « collision douce »). `canvas.js` les câble en DOM impératif (layer SVG des câbles + transform transitoire des nodes poussés).
 
 ## Docs
 - `docs/ROADMAP.md` — où on en est + reste à faire (à lire en premier).
