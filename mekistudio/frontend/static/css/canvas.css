@@ -218,3 +218,7 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .cable.k2e .cable-halo, .cable.k2e .cable-core { stroke: #b388ff; }
 .cable.e2e .cable-halo, .cable.e2e .cable-core { stroke: #45d6c2; }
 .cable.cable-default .cable-halo, .cable.cable-default .cable-core { stroke: #8893a7; }
+
+/* --- Anti-collision : ecart/retour anime via transform --- */
+.node-wrap { transition: transform .12s ease-out; }
+.node-wrap.dragging { transition: none; } /* le node tenu ne traine pas son transform */
