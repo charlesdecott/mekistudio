@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from mekistudio.backend.components.base import ComponentBase, new_id
 from mekistudio.backend.components.primitives import (
+    ChatComponent,
     Component,
     EditorComponent,
     FileTreeComponent,
@@ -20,5 +21,6 @@ __all__ = [
     "NodeComponent",
     "FileTreeComponent",
     "EditorComponent",
+    "ChatComponent",
     "iter_components",
 ]

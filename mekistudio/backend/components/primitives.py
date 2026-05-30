@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import Field
 
-from mekistudio.backend.components.base import ComponentBase
+from mekistudio.backend.components.base import ComponentBase, new_id
 
 
 class HeaderComponent(ComponentBase):
@@ -53,6 +53,19 @@ class EditorComponent(ComponentBase):
     file_path: str = ""
 
 
+class ChatComponent(ComponentBase):
+    """Surface de chat (conversation Claude). Ne porte que l'identité de la
+    conversation : les messages ne sont PAS dans canvas.json — ils vivent dans
+    .mekistudio/conversations/<id>/ et se chargent via la WebSocket /ws/chat
+    (comme le filetree via /api/fs). `conversation_id` est stable et persisté ;
+    il tourne au clear (nouvelle session)."""
+
+    type: Literal["chat"] = "chat"
+    conversation_id: str = Field(default_factory=new_id)
+    title: str = "chat"
+    placeholder: str = "Écris à Claude…"
+
+
 # Union discriminée : le champ `type` sélectionne la classe au parsing. C'est
 # ce qui permet de (dé)sérialiser un arbre hétérogène sans perdre les types.
 Component = Annotated[
@@ -62,6 +75,7 @@ Component = Annotated[
         HeaderComponent,
         FileTreeComponent,
         EditorComponent,
+        ChatComponent,
     ],
     Field(discriminator="type"),
 ]
