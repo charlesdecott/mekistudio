@@ -19,7 +19,7 @@ class ChatManager:
         bridge = self._bridges.get(conversation_id)
         if bridge is None:
             store = ConversationStore(self._root, conversation_id)
-            bridge = ChatBridge(conversation_id, store, self._factory)
+            bridge = ChatBridge(conversation_id, store, self._factory, repo_root=self._root)
             await bridge.start()
             self._bridges[conversation_id] = bridge
         return bridge

@@ -271,3 +271,65 @@ async def test_consume_error_finalizes_bubble_and_degrades(tmp_path):
     recs = await store.read_since(0)
     assert any(r["type"] == "assistant_message" and r["text"] == "partiel" and r["status"] == "error" for r in recs)
     await bridge.shutdown()
+
+
+# --- brique D : tours multi-étapes + outils ---
+
+async def test_multistep_turn_with_tool(tmp_path):
+    store = ConversationStore(tmp_path, "ct1")
+    script = [
+        {"kind": "message_start"}, {"kind": "delta", "text": "Je lis"},
+        {"kind": "assistant", "text": "Je lis", "tools": [{"id": "X", "name": "Read", "input": {"file_path": "a.py"}}]},
+        {"kind": "tool_result", "id": "X", "output": "73 l.", "is_error": False},
+        {"kind": "message_start"}, {"kind": "delta", "text": "Fait"},
+        {"kind": "assistant", "text": "Fait", "tools": []},
+        {"kind": "result", "subtype": "success", "session_id": "s"},
+    ]
+    bridge = ChatBridge("ct1", store, _factory([script]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("lis a.py")
+    await _drain_until(q, "tool_result")
+    recs = await store.read_since(0)
+    assert [r["type"] for r in recs].count("assistant_message") == 2
+    assert any(r["type"] == "tool_use" and r["id"] == "X" and r["name"] == "Read" for r in recs)
+    assert any(r["type"] == "tool_result" and r["id"] == "X" and r["is_error"] is False for r in recs)
+    await bridge.shutdown()
+
+
+async def test_orphan_tool_closed_on_turn_end(tmp_path):
+    store = ConversationStore(tmp_path, "ct2")
+    script = [
+        {"kind": "message_start"}, {"kind": "delta", "text": "lis"},
+        {"kind": "assistant", "text": "lis", "tools": [{"id": "Y", "name": "Read", "input": {"file_path": "a.py"}}]},
+        {"kind": "result", "subtype": "error_during_execution", "session_id": "s"},
+    ]
+    bridge = ChatBridge("ct2", store, _factory([script]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("go")
+    await _drain_until(q, "tool_result")  # le synthétique de fin de tour
+    recs = await store.read_since(0)
+    assert any(r["type"] == "tool_result" and r["id"] == "Y" and r["is_error"] is True for r in recs)
+    await bridge.shutdown()
+
+
+async def test_text_only_turn_unchanged(tmp_path):
+    store = ConversationStore(tmp_path, "ct3")
+    script = [
+        {"kind": "message_start"}, {"kind": "delta", "text": "Bonjour"},
+        {"kind": "assistant", "text": "Bonjour", "tools": []},
+        {"kind": "result", "subtype": "success", "session_id": "s"},
+    ]
+    bridge = ChatBridge("ct3", store, _factory([script]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("salut")
+    await _drain_until(q, "message_stop")
+    recs = await store.read_since(0)
+    assert [r["type"] for r in recs].count("assistant_message") == 1
+    assert all(r["type"] not in ("tool_use", "tool_result") for r in recs)
+    await bridge.shutdown()

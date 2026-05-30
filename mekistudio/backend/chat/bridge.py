@@ -16,10 +16,12 @@ ClientFactory = Callable[[Any], Any]
 
 
 class ChatBridge:
-    def __init__(self, conversation_id: str, store: ConversationStore, client_factory: ClientFactory) -> None:
+    def __init__(self, conversation_id: str, store: ConversationStore, client_factory: ClientFactory,
+                 repo_root=None) -> None:
         self._cid = conversation_id
         self._store = store
         self._factory = client_factory
+        self._repo_root = repo_root  # cwd + confinement des outils (brique D)
         self._client: Any = None
         self._to_sdk: asyncio.Queue[str] = asyncio.Queue()
         self._pending: list[str] = []
@@ -27,11 +29,13 @@ class ChatBridge:
         self._lock = asyncio.Lock()
         self._state = "idle"  # idle | running | error
         self._in_flight: dict | None = None  # {"message_id", "text"}
-        self._final_text: str | None = None
-        self._last_subtype: str | None = None
         self._turn_id: str | None = None
         self._stop_requested = False
-        self._finalized = False
+        # Tour multi-étapes (brique D) : une étape = un AssistantMessage.
+        self._step_finalized = False        # reset à chaque message_start
+        self._turn_finalized = False        # reset dans _start_turn
+        self._turn_tool_ids: set = set()    # tool_use émis dans le tour
+        self._turn_tool_results: set = set()  # tool_result reçus dans le tour
         self._consume_task: asyncio.Task | None = None
         self._error_message: str | None = None
         self._drop_events: dict = {}  # queue -> asyncio.Event, signalé sur QueueFull (D17)
@@ -59,7 +63,7 @@ class ChatBridge:
         from mekistudio.backend.chat.options import build_options
 
         try:
-            options = build_options(self._cid, self._store)
+            options = build_options(self._repo_root, self._store)
             self._client = self._factory(options)
             await self._client.connect(self._message_stream())
             self._consume_task = asyncio.create_task(self._consume())
@@ -109,10 +113,11 @@ class ChatBridge:
         self._state = "running"
         self._turn_id = events.new_id()
         self._stop_requested = False
-        self._finalized = False
+        self._turn_finalized = False
+        self._step_finalized = False
         self._in_flight = None
-        self._final_text = None
-        self._last_subtype = None
+        self._turn_tool_ids.clear()
+        self._turn_tool_results.clear()
         self._to_sdk.put_nowait(text)
 
     # --- boucle de consommation unique (tous les tours) ---
@@ -125,6 +130,7 @@ class ChatBridge:
                     await self._maybe_persist_session(ev.get("session_id"))
                 elif kind == "message_start":
                     async with self._lock:
+                        self._step_finalized = False
                         self._in_flight = {"message_id": events.new_id(), "text": ""}
                         self._broadcast(events.message_start(self._in_flight["message_id"]))
                 elif kind == "delta":
@@ -134,11 +140,17 @@ class ChatBridge:
                             self._in_flight["text"] += chunk
                             self._broadcast(events.text_delta(self._in_flight["message_id"], chunk))
                 elif kind == "assistant":
-                    self._final_text = ev.get("text", "")
+                    await self._finalize_step(ev.get("text", ""), ev.get("tools") or [])
+                elif kind == "tool_result":
+                    async with self._lock:
+                        rec = await self._store.append(
+                            events.tool_result(ev["id"], ev.get("output", ""), bool(ev.get("is_error")))
+                        )
+                        self._broadcast(rec)
+                        self._turn_tool_results.add(ev["id"])
                 elif kind == "result":
-                    self._last_subtype = ev.get("subtype")
                     await self._maybe_persist_session(ev.get("session_id"))
-                    await self._finalize()
+                    await self._end_turn()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -147,8 +159,8 @@ class ChatBridge:
             # passe en état 'error' -> les prompts suivants renvoient une erreur ; récupération
             # via ✨ Nouvelle session (clear -> nouveau bridge).
             async with self._lock:
-                if self._in_flight is not None and not self._finalized:
-                    self._finalized = True
+                if self._in_flight is not None and not self._step_finalized:
+                    self._step_finalized = True
                     arec = await self._store.append(events.assistant_message(self._in_flight.get("text", ""), "error"))
                     self._broadcast(events.message_stop(self._in_flight["message_id"], arec["seq"], "error"))
                     self._in_flight = None
@@ -166,27 +178,42 @@ class ChatBridge:
         rec = await self._store.append(events.session_event(sid))
         self._broadcast(rec)
 
-    async def _finalize(self) -> None:
+    async def _finalize_step(self, text: str, tools: list) -> None:
+        """Une ÉTAPE = un AssistantMessage (texte + 0..n outils), finalisée sur l'event assistant.
+        Le texte vient de l'EVENT (≠ squelette qui agrégeait un _final_text per-tour)."""
         async with self._lock:
-            if self._finalized:
+            if self._step_finalized:
                 return
-            self._finalized = True
-            if self._stop_requested:
-                status = "interrupted"  # déduit du flag, JAMAIS du subtype (= error_during_execution)
-            elif self._last_subtype not in (None, "success"):
-                status = "error"
-            else:
-                status = "success"
+            self._step_finalized = True
             inflight = self._in_flight
-            text = self._final_text if self._final_text is not None else (inflight or {}).get("text", "")
-            # Tour vide réussi SANS bulle entamée (aucun message_start) -> rien à afficher, et
-            # surtout rien à persister (cohérent live/replay, #11). Si une bulle a été entamée
-            # (message_start), on la ferme toujours pour ne pas la laisser en streaming.
-            if not (inflight is None and not text and status == "success"):
+            # Étape vide (aucun message_start, ni texte, ni outil) -> rien à afficher/persister.
+            if not (inflight is None and not text and not tools):
                 mid = (inflight or {}).get("message_id") or events.new_id()
-                rec = await self._store.append(events.assistant_message(text, status))
-                self._broadcast(events.message_stop(mid, rec["seq"], status))
+                rec = await self._store.append(events.assistant_message(text, "success"))
+                self._broadcast(events.message_stop(mid, rec["seq"], "success"))
+            for t in tools:
+                tu = await self._store.append(events.tool_use(t["id"], t["name"], t.get("input") or {}))
+                self._broadcast(tu)
+                self._turn_tool_ids.add(t["id"])
             self._in_flight = None
+
+    async def _end_turn(self) -> None:
+        """Fin de tour (ResultMessage SDK) : finalise une étape en vol restante (interrupt avant
+        l'AssistantMessage), BALAYE les outils orphelins (tool_use sans tool_result → carte fermée,
+        live ET replay, D8), puis dépile la file ou idle."""
+        async with self._lock:
+            if self._turn_finalized:
+                return
+            self._turn_finalized = True
+            if self._in_flight is not None:
+                status = "interrupted" if self._stop_requested else "success"
+                mid = self._in_flight["message_id"]
+                rec = await self._store.append(events.assistant_message(self._in_flight.get("text", ""), status))
+                self._broadcast(events.message_stop(mid, rec["seq"], status))
+                self._in_flight = None
+            for tid in self._turn_tool_ids - self._turn_tool_results:
+                tr = await self._store.append(events.tool_result(tid, "interrompu", True))
+                self._broadcast(tr)
             if self._pending:  # enchaînement de la file
                 nxt = self._pending.pop(0)
                 self._broadcast_queued()
