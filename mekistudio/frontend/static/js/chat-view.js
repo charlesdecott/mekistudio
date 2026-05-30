@@ -113,13 +113,17 @@
       list.innerHTML = '';
       streamEl = null;
       for (const m of state.messages) {
+        const hasTools = m.kind === 'assistant' && (m.tools || []).some((id) => state.toolsById[id]);
+        const hasText = !!(m.text && m.text.length);
+        // bulle assistant SANS contenu (ni texte, ni outil, pas en streaming) -> on ne l'affiche pas
+        // (groupe vide du SDK : message_start/message_stop sans bloc utile).
+        if (m.kind === 'assistant' && m.status !== 'streaming' && !hasText && !hasTools) continue;
         const row = el('div', 'chat-row chat-' + m.kind);
         const avatar = el('div', 'chat-avatar chat-av-' + m.kind);
         avatar.textContent = m.kind === 'user' ? 'C' : m.kind === 'assistant' ? '✦' : '!';
         const body = el('div', 'chat-body');
         const name = el('div', 'chat-name');
         name.textContent = m.kind === 'user' ? 'charles' : m.kind === 'assistant' ? 'Claude' : 'erreur';
-        const hasText = !!(m.text && m.text.length);
         if (hasText || m.status === 'streaming' || m.kind !== 'assistant') {
           const content = el('div', 'chat-content');
           if (m.kind === 'assistant') {
