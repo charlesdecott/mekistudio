@@ -11,6 +11,8 @@
   <!-- géométries pures (window.MekiCables / MekiCollision) — avant canvas.js qui les utilise. -->
   <script defer src="/static/js/cables.js"></script>
   <script defer src="/static/js/collision.js"></script>
+  <!-- mapping pur hook/event -> intention d'impulsion (window.MekiImpulses) — avant chat-view/canvas. -->
+  <script defer src="/static/js/chat-impulses.js"></script>
   <!-- chat : markdown assaini + réducteur pur + vue, AVANT canvas.js et AVANT Alpine.
        Les `defer` s'exécutent dans l'ordre du document -> window.marked/DOMPurify/MekiChat
        /MekiChatView sont prêts au 1er rendu de la branche chat de renderComponent. -->
