@@ -67,6 +67,7 @@
     let reconnectTimer = null;
     let streamEl = null;   // élément de contenu de la bulle en vol (fast-path text_delta)
     let streamMid = null;
+    let mdTimer = null; // throttle du rendu markdown live (~16 fps ; setTimeout = fiable même en arrière-plan/headless)
 
     // --- DOM ---
     const wrap = el('div', 'cmp-chat');
@@ -121,8 +122,8 @@
         const hasText = !!(m.text && m.text.length);
         if (hasText || m.status === 'streaming' || m.kind !== 'assistant') {
           const content = el('div', 'chat-content');
-          if (m.kind === 'assistant' && m.status !== 'streaming') {
-            content.innerHTML = renderMarkdown(m.text);  // markdown assaini pour le texte final
+          if (m.kind === 'assistant') {
+            content.innerHTML = renderMarkdown(m.text);  // markdown assaini, EN STREAMING comme au final
           } else {
             content.textContent = m.text || '';
           }
@@ -161,14 +162,25 @@
       });
     }
 
+    // Rendu markdown LIVE de la bulle en vol, throttlé à 1×/frame (évite de re-parser à chaque
+    // token = coût quadratique). Ne touche QUE la bulle en vol, pas tout l'historique.
+    function scheduleStreamRender() {
+      if (mdTimer) return;
+      mdTimer = setTimeout(() => {
+        mdTimer = null;
+        if (streamEl && state.inFlight) {
+          streamEl.innerHTML = renderMarkdown(state.inFlight.text);
+          streamEl.appendChild(el('span', 'chat-cursor'));
+          list.scrollTop = list.scrollHeight;
+        }
+      }, 60);
+    }
+
     function applyEvent(ev) {
       MekiChat.reduce(state, ev);
-      // fast-path streaming : ne re-render PAS tout l'historique à chaque token (coût
-      // quadratique sur longue réponse, #8) -> on met à jour seulement la bulle en vol.
+      // fast-path streaming : markdown live de la SEULE bulle en vol (throttlé).
       if (ev.type === 'text_delta' && streamEl && streamMid === ev.message_id && state.inFlight) {
-        streamEl.textContent = state.inFlight.text;
-        streamEl.appendChild(el('span', 'chat-cursor'));
-        list.scrollTop = list.scrollHeight;
+        scheduleStreamRender();
         return;
       }
       render();
@@ -242,6 +254,7 @@
       el: wrap,
       destroy() {
         generation++; // invalide les closures des sockets en vol
+        if (mdTimer) { clearTimeout(mdTimer); mdTimer = null; }
         closeWs();
       },
     };
