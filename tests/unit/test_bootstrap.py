@@ -30,7 +30,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
     assert isinstance(state, CanvasState)
     assert state.viewport == Viewport()  # défauts, pas de crash
     # Invariant « jamais vide » : on retombe sur le canvas par défaut (built-in).
-    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer"}
+    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer", "chat"}
     # Le fichier corrompu est préservé en .bak (pas de perte silencieuse).
     assert cpath.with_name(cpath.name + ".bak").read_text(encoding="utf-8") == "{ pas du json"
 
@@ -38,7 +38,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
 def test_fresh_canvas_seeds_builtin_nodes(tmp_path):
     bootstrap.ensure_meki_dir(tmp_path)
     state = bootstrap.load_canvas(tmp_path)
-    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer"}
+    assert {n.kind for n in state.nodes} == {"kernel", "fileexplorer", "chat"}
 
 
 def test_ensure_adds_missing_builtin_nodes(tmp_path):
@@ -49,7 +49,7 @@ def test_ensure_adds_missing_builtin_nodes(tmp_path):
     bootstrap.save_canvas(tmp_path, state)
     bootstrap.ensure_meki_dir(tmp_path)
     assert {n.kind for n in bootstrap.load_canvas(tmp_path).nodes} == {
-        "kernel", "fileexplorer"
+        "kernel", "fileexplorer", "chat"
     }
 
 

@@ -31,7 +31,7 @@ def test_get_canvas_returns_state(tmp_path):
     body = r.json()
     # Built-in : kernel + explorateur (l'éditeur est dynamique).
     kinds = {n["kind"] for n in body["nodes"]}
-    assert kinds == {"kernel", "fileexplorer"}
+    assert kinds == {"kernel", "fileexplorer", "chat"}
     assert all(n["root"]["type"] == "node" for n in body["nodes"])
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 

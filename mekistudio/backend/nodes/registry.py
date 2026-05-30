@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable
 
 from mekistudio.backend.models import CanvasState, Node
-from mekistudio.backend.nodes import file_editor, file_explorer, kernel
+from mekistudio.backend.nodes import chat, file_editor, file_explorer, kernel
 
 # kind -> fabrique de node. Unique endroit qui connaît tous les kinds ; on
 # grandira ce registre node après node (chat, git, ...).
@@ -11,6 +11,7 @@ NODE_BUILDERS: dict[str, Callable[..., Node]] = {
     kernel.KIND: kernel.build_kernel_node,
     file_explorer.KIND: file_explorer.build_file_explorer_node,
     file_editor.KIND: file_editor.build_file_editor_node,
+    chat.KIND: chat.build_chat_node,
 }
 
 
@@ -24,6 +25,7 @@ def build_node(kind: str, **kwargs) -> Node:
 CANONICAL_PARENT_KIND: dict[str, str] = {
     file_explorer.KIND: kernel.KIND,
     file_editor.KIND: file_explorer.KIND,
+    chat.KIND: kernel.KIND,
 }
 
 
@@ -67,8 +69,10 @@ def reconcile_constraints(state: CanvasState) -> CanvasState:
 
 
 def default_canvas() -> CanvasState:
-    """Canvas initial : kernel (racine) + explorateur relié au kernel."""
+    """Canvas initial : kernel (racine) + explorateur + chat, reliés au kernel."""
     k = kernel.build_kernel_node()
     e = file_explorer.build_file_explorer_node()
     e.source_id = k.id  # 1 câble par node : l'explorateur pend au kernel
-    return CanvasState(nodes=[k, e])
+    c = chat.build_chat_node()
+    c.source_id = k.id  # le chat pend aussi au kernel
+    return CanvasState(nodes=[k, e, c])
