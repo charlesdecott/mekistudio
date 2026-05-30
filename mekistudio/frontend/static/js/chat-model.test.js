@@ -34,6 +34,18 @@ test('replay assistant_message + dédup par seq (replay puis live = bulle unique
   assert.equal(s.messages.filter((m) => m.kind === 'assistant').length, 1);
 });
 
+test('dropInFlight retire la bulle en vol non finalisée puis le replay durable = bulle unique', () => {
+  let s = MekiChat.createState();
+  s = MekiChat.reduce(s, { type: 'message_start', message_id: 'm1' });
+  s = MekiChat.reduce(s, { type: 'text_delta', message_id: 'm1', text: 'AB' });
+  assert.equal(s.messages.length, 1);
+  MekiChat.dropInFlight(s);
+  assert.equal(s.messages.length, 0);
+  assert.equal(s.inFlight, null);
+  s = MekiChat.reduce(s, { type: 'assistant_message', seq: 3, text: 'ABCD', status: 'success' });
+  assert.equal(s.messages.filter((m) => m.kind === 'assistant').length, 1);
+});
+
 test('queued met à jour la file ; error crée une bulle', () => {
   let s = MekiChat.createState();
   s = MekiChat.reduce(s, { type: 'queued', items: [{ index: 0, text: 'a' }] });

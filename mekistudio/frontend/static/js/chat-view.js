@@ -30,6 +30,8 @@
     let intentionalClose = false;
     let backoff = 500;
     let reconnectTimer = null;
+    let streamEl = null;   // élément de contenu de la bulle en vol (fast-path text_delta)
+    let streamMid = null;
 
     // --- DOM ---
     const wrap = el('div', 'cmp-chat');
@@ -73,6 +75,7 @@
     // --- rendu ---
     function render() {
       list.innerHTML = '';
+      streamEl = null;
       for (const m of state.messages) {
         const row = el('div', 'chat-row chat-' + m.kind);
         const avatar = el('div', 'chat-avatar chat-av-' + m.kind);
@@ -86,7 +89,11 @@
         } else {
           content.textContent = m.text || '';
         }
-        if (m.status === 'streaming') content.append(el('span', 'chat-cursor'));
+        if (m.status === 'streaming') {
+          content.append(el('span', 'chat-cursor'));
+          streamEl = content;
+          streamMid = m.message_id;
+        }
         body.append(name, content);
         if (m.status === 'interrupted') body.append(el('div', 'chat-interrupted'));
         row.append(avatar, body);
@@ -94,7 +101,9 @@
       }
       list.scrollTop = list.scrollHeight;
 
-      statusBar.style.display = (state.state === 'running' || state.inFlight) ? 'flex' : 'none';
+      // La statusbar « Claude écrit… » suit l'EXISTENCE d'une bulle en vol (pas un état deviné) :
+      // après un reload d'une conversation finie, inFlight est null -> pas de barre figée (#7).
+      statusBar.style.display = state.inFlight ? 'flex' : 'none';
 
       chips.innerHTML = '';
       state.queue.forEach((it) => {
@@ -109,9 +118,15 @@
     }
 
     function applyEvent(ev) {
-      if (ev.type === 'message_start' || ev.type === 'text_delta' || ev.type === 'user_message') state.state = 'running';
-      if (ev.type === 'message_stop') state.state = 'idle';
       MekiChat.reduce(state, ev);
+      // fast-path streaming : ne re-render PAS tout l'historique à chaque token (coût
+      // quadratique sur longue réponse, #8) -> on met à jour seulement la bulle en vol.
+      if (ev.type === 'text_delta' && streamEl && streamMid === ev.message_id && state.inFlight) {
+        streamEl.textContent = state.inFlight.text;
+        streamEl.appendChild(el('span', 'chat-cursor'));
+        list.scrollTop = list.scrollHeight;
+        return;
+      }
       render();
     }
 
@@ -127,6 +142,10 @@
       ws = new WebSocket(proto + '://' + location.host + '/ws/chat/' + convId);
       ws.addEventListener('open', () => {
         backoff = 500;
+        // À la (re)connexion, jeter la bulle en vol non finalisée : le serveur la renverra (tour
+        // en cours) ou enverra sa version durable au replay -> pas de double bulle (#12).
+        MekiChat.dropInFlight(state);
+        render();
         sendWs({ type: 'attach', since_seq: state.lastSeq });
       });
       ws.addEventListener('message', (e) => {

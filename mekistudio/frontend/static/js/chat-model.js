@@ -84,7 +84,21 @@
     return state;
   }
 
-  const MekiChat = { createState, reduce };
+  // Retire la bulle assistant en vol NON finalisée (pas de seq). À appeler avant une
+  // reconnexion : le serveur la renverra (tour en cours -> message_start+catch-up) ou enverra
+  // sa version durable (assistant_message) au replay -> évite la double bulle (#12).
+  function dropInFlight(state) {
+    const m = state.inFlight;
+    if (m) {
+      const i = state.messages.indexOf(m);
+      if (i >= 0) state.messages.splice(i, 1);
+      if (m.message_id) delete state.byId[m.message_id];
+      state.inFlight = null;
+    }
+    return state;
+  }
+
+  const MekiChat = { createState, reduce, dropInFlight };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiChat;
   if (typeof window !== 'undefined') root.MekiChat = MekiChat;
 })(typeof window !== 'undefined' ? window : globalThis);
