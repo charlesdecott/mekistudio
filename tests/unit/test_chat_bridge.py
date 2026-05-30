@@ -219,3 +219,55 @@ async def test_start_connect_error_degrades(tmp_path):
     ev = await asyncio.wait_for(q.get(), 2.0)
     assert ev["type"] == "error" and "claude" in ev["message"].lower()
     await bridge.shutdown()
+
+
+async def test_backpressure_drops_slow_socket_and_signals(tmp_path):
+    # Socket lent (queue bornee jamais drainee) -> QueueFull -> desabonne + Event on_drop set (D17).
+    store = ConversationStore(tmp_path, "cbp")
+    script = (
+        [{"kind": "message_start"}]
+        + [{"kind": "delta", "text": "x"} for _ in range(20)]
+        + [{"kind": "assistant", "text": "x" * 20}, {"kind": "result", "subtype": "success", "session_id": "s"}]
+    )
+    bridge = ChatBridge("cbp", store, _factory([script]))
+    await bridge.start()
+    q = asyncio.Queue(maxsize=3)
+    drop = asyncio.Event()
+    await bridge.attach(q, 0, on_drop=drop)
+    await bridge.submit_prompt("go")
+    await asyncio.wait_for(drop.wait(), 2.0)  # le bridge a signale la fermeture
+    assert q not in bridge._subscribers
+    await bridge.shutdown()
+
+
+async def test_consume_error_finalizes_bubble_and_degrades(tmp_path):
+    # Exception en plein tour -> bulle finalisee (error), file videe, etat 'error' (recover via clear).
+    store = ConversationStore(tmp_path, "cerr")
+
+    class BoomMidTurn(FakeClient):
+        async def receive(self):
+            async for _msg in self._stream:
+                yield {"kind": "message_start"}
+                yield {"kind": "delta", "text": "partiel"}
+                raise RuntimeError("flux SDK casse")
+
+    bridge = ChatBridge("cerr", store, lambda o: BoomMidTurn([]))
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("go")
+
+    stop_ev = await _drain_until(q, "message_stop")
+    assert stop_ev["status"] == "error"
+    err = await _drain_until(q, "error")
+    assert "casse" in err["message"]
+    assert bridge.state == "error" and bridge.pending == []
+
+    # un nouveau prompt renvoie une erreur explicite (pas de silence / zombie)
+    await bridge.submit_prompt("encore")
+    err2 = await _drain_until(q, "error")
+    assert err2["type"] == "error"
+    # le partiel a bien ete persiste comme assistant_message error
+    recs = await store.read_since(0)
+    assert any(r["type"] == "assistant_message" and r["text"] == "partiel" and r["status"] == "error" for r in recs)
+    await bridge.shutdown()

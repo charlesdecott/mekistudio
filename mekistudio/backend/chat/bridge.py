@@ -34,6 +34,7 @@ class ChatBridge:
         self._finalized = False
         self._consume_task: asyncio.Task | None = None
         self._error_message: str | None = None
+        self._drop_events: dict = {}  # queue -> asyncio.Event, signalé sur QueueFull (D17)
 
     # --- propriétés publiques ---
     @property
@@ -68,16 +69,23 @@ class ChatBridge:
             self._consume_task = None
             self._error_message = f"Connexion SDK impossible : {exc}"
 
-    # --- broadcast (D17 : non bloquant ; socket lent -> désabonné, il rattrapera par replay) ---
+    # --- broadcast (D17 : non bloquant ; socket lent -> désabonné ET fermé, il rattrape par replay) ---
     def _broadcast(self, ev: dict) -> None:
         for q in list(self._subscribers):
             try:
                 q.put_nowait(ev)
             except asyncio.QueueFull:
+                # Socket trop lent : désabonner ET signaler la fermeture. Sans ce signal, le
+                # sender resterait bloqué à jamais sur queue.get() (fuite de WS + tâches). Le
+                # client se reconnecte ensuite et rattrape via attach{since_seq}.
                 self._subscribers.discard(q)
+                ev_drop = self._drop_events.pop(q, None)
+                if ev_drop is not None:
+                    ev_drop.set()
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         self._subscribers.discard(queue)
+        self._drop_events.pop(queue, None)
 
     def _broadcast_queued(self) -> None:
         self._broadcast(events.queued([{"index": i, "text": t} for i, t in enumerate(self._pending)]))
@@ -133,12 +141,23 @@ class ChatBridge:
                     await self._finalize()
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # erreur de session en cours -> event error, le bridge survit
-            rec = await self._store.append(events.error_event(f"Erreur de session : {exc}"))
-            self._broadcast(rec)
+        except Exception as exc:
+            # La boucle _consume est MORTE : plus aucun tour ne sera traité. On finalise la bulle
+            # en vol (sinon figée en streaming), on vide la file (sinon prompts bloqués) et on
+            # passe en état 'error' -> les prompts suivants renvoient une erreur ; récupération
+            # via ✨ Nouvelle session (clear -> nouveau bridge).
             async with self._lock:
-                self._state = "idle"
-                self._in_flight = None
+                if self._in_flight is not None and not self._finalized:
+                    self._finalized = True
+                    arec = await self._store.append(events.assistant_message(self._in_flight.get("text", ""), "error"))
+                    self._broadcast(events.message_stop(self._in_flight["message_id"], arec["seq"], "error"))
+                    self._in_flight = None
+                erec = await self._store.append(events.error_event(f"Erreur de session : {exc}"))
+                self._broadcast(erec)
+                self._pending.clear()
+                self._broadcast_queued()
+                self._state = "error"
+                self._error_message = "Session interrompue par une erreur. Clique ✨ Nouvelle session."
 
     async def _maybe_persist_session(self, sid: str | None) -> None:
         if not sid or self._store.meta().get("claude_session_id"):
@@ -158,10 +177,15 @@ class ChatBridge:
                 status = "error"
             else:
                 status = "success"
-            text = self._final_text if self._final_text is not None else (self._in_flight or {}).get("text", "")
-            mid = (self._in_flight or {}).get("message_id") or events.new_id()
-            rec = await self._store.append(events.assistant_message(text, status))
-            self._broadcast(events.message_stop(mid, rec["seq"], status))
+            inflight = self._in_flight
+            text = self._final_text if self._final_text is not None else (inflight or {}).get("text", "")
+            # Tour vide réussi SANS bulle entamée (aucun message_start) -> rien à afficher, et
+            # surtout rien à persister (cohérent live/replay, #11). Si une bulle a été entamée
+            # (message_start), on la ferme toujours pour ne pas la laisser en streaming.
+            if not (inflight is None and not text and status == "success"):
+                mid = (inflight or {}).get("message_id") or events.new_id()
+                rec = await self._store.append(events.assistant_message(text, status))
+                self._broadcast(events.message_stop(mid, rec["seq"], status))
             self._in_flight = None
             if self._pending:  # enchaînement de la file
                 nxt = self._pending.pop(0)
@@ -171,23 +195,40 @@ class ChatBridge:
                 self._state = "idle"
 
     # --- reattach atomique (D6) ---
-    async def attach(self, queue: asyncio.Queue, since_seq: int) -> None:
-        records = await self._store.read_since(since_seq)  # await AVANT le verrou
-        async with self._lock:  # section critique SANS await -> atomique vs _consume
-            for rec in records:
+    async def attach(self, queue: asyncio.Queue, since_seq: int, on_drop: asyncio.Event | None = None) -> None:
+        # Replay de l'historique via put BLOQUANT, HORS verrou : le sender draine la queue au
+        # fil de l'eau -> pas de QueueFull même sur une très longue conversation (>maxsize).
+        records = await self._store.read_since(since_seq)
+        last = since_seq
+        for rec in records:
+            await queue.put(rec)
+            last = rec.get("seq", last)
+        # Section critique SANS await suspensif (read_since/put_nowait ne cèdent pas la main) ->
+        # atomique vs _consume/_finalize. On rattrape les records devenus durables PENDANT le
+        # replay (gap), on émet l'in-flight (même message_id), et on s'abonne d'un bloc.
+        async with self._lock:
+            for rec in await self._store.read_since(last):
                 queue.put_nowait(rec)
             if self._state == "running" and self._in_flight is not None:
                 queue.put_nowait(events.message_start(self._in_flight["message_id"]))
                 queue.put_nowait(events.text_delta(self._in_flight["message_id"], self._in_flight["text"]))
             self._subscribers.add(queue)
+            if on_drop is not None:
+                self._drop_events[queue] = on_drop
 
     # --- contrôles ---
     async def stop(self) -> None:
+        # interrupt() SOUS le verrou : _finalize/_start_turn prennent le même verrou, donc le tour
+        # vu 'running' ne peut pas finir + enchaîner pendant qu'on interrompt -> on vise toujours
+        # le BON tour (D16). try/except : un interrupt qui lève ne doit pas tuer la WS.
         async with self._lock:
             if self._state != "running" or self._client is None:
                 return
             self._stop_requested = True
-        await self._client.interrupt()  # le result de fin arrivera dans _consume -> _finalize
+            try:
+                await self._client.interrupt()
+            except Exception:
+                pass
 
     async def cancel_queued(self, index: int) -> None:
         async with self._lock:

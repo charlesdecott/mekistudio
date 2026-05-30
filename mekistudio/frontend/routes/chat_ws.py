@@ -35,18 +35,28 @@ async def chat_ws(ws: WebSocket, conversation_id: str) -> None:
     repo_root = ws.app.state.repo_root
     bridge = await manager.get_or_create(conversation_id)
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    drop = asyncio.Event()  # mis par le bridge si la queue déborde (socket lent) -> on ferme la WS
 
     async def sender() -> None:
         while True:
-            ev = await queue.get()
-            await ws.send_json(ev)
+            get_t = asyncio.ensure_future(queue.get())
+            drop_t = asyncio.ensure_future(drop.wait())
+            done, pending = await asyncio.wait({get_t, drop_t}, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            if drop.is_set():
+                # le bridge nous a désabonnés (trop lent) -> fermer ; le client se reconnecte et
+                # rattrape via attach{since_seq} (1013 = « try again later »).
+                await ws.close(code=1013)
+                return
+            await ws.send_json(get_t.result())
 
     async def receiver() -> None:
         while True:
             msg = await ws.receive_json()
             t = msg.get("type")
             if t == "attach":
-                await bridge.attach(queue, int(msg.get("since_seq", 0)))
+                await bridge.attach(queue, int(msg.get("since_seq", 0)), on_drop=drop)
             elif t == "prompt":
                 await bridge.submit_prompt(msg.get("text", ""))
             elif t == "stop":

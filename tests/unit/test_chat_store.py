@@ -30,3 +30,13 @@ async def test_tolerates_truncated_last_line(tmp_path):
     s2 = ConversationStore(tmp_path, "c2")  # ne doit PAS lever
     assert s2.next_seq == 2
     assert [r["text"] for r in await s2.read_since(0)] == ["ok"]
+
+
+async def test_read_since_tolerates_non_object_line(tmp_path):
+    s = ConversationStore(tmp_path, "cnd")
+    await s.append(events.user_message("ok"))
+    p = tmp_path / ".mekistudio" / "conversations" / "cnd" / "messages.jsonl"
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write("12345\n")  # ligne JSON valide mais non-objet -> doit etre ignoree, pas de crash
+    recs = await s.read_since(0)
+    assert [r["text"] for r in recs] == ["ok"]

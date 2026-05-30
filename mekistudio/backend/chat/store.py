@@ -54,6 +54,8 @@ class ConversationStore:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(rec, dict):
+                continue  # ligne JSON valide mais non-objet (ex. nombre nu) -> ignorée (#10)
             if int(rec.get("seq", 0)) > seq:
                 out.append(rec)
         return out
