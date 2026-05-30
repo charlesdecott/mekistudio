@@ -347,6 +347,63 @@ async def test_parallel_tools_one_group(tmp_path):
     await bridge.shutdown()
 
 
+async def test_message_stop_after_stop_marks_interrupted(tmp_path):
+    # U1 (revue D) : si stop() arrive AVANT le message_stop du groupe, la bulle close au message_stop
+    # doit refléter l'interruption ('interrupted'), pas le 'success' codé en dur par défaut.
+    store = ConversationStore(tmp_path, "cu1")
+    gate = asyncio.Event()
+    holder = {}
+    turn = [
+        {"kind": "message_start"}, {"kind": "delta", "text": "partiel"},
+        {"kind": "_gate", "event": gate},
+        {"kind": "message_stop"},  # le SDK clôt le groupe APRÈS l'interrupt
+        {"kind": "result", "subtype": "error_during_execution", "session_id": "s"},
+    ]
+
+    def factory(o):
+        c = FakeClient([turn])
+        holder["c"] = c
+        return c
+
+    bridge = ChatBridge("cu1", store, factory)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("vas-y")
+    await _drain_until(q, "text_delta")
+    await bridge.stop()
+    gate.set()
+    stop_ev = await _drain_until(q, "message_stop")
+    assert stop_ev["status"] == "interrupted"
+    recs = await store.read_since(0)
+    assert any(r["type"] == "assistant_message" and r["text"] == "partiel" and r["status"] == "interrupted" for r in recs)
+    await bridge.shutdown()
+
+
+async def test_late_tool_result_after_end_turn_ignored(tmp_path):
+    # spec §4.2 : un tool_result qui arriverait APRÈS le ResultMessage (tour finalisé, carte close par
+    # le synthétique D8) ne doit PAS rouvrir la carte -> ignoré (pas de 2e tool_result persisté).
+    store = ConversationStore(tmp_path, "cu2")
+    script = [
+        {"kind": "message_start"},
+        {"kind": "assistant", "text": "", "tools": [{"id": "Z", "name": "Read", "input": {"file_path": "a.py"}}]},
+        {"kind": "result", "subtype": "success", "session_id": "s"},
+        {"kind": "tool_result", "id": "Z", "output": "tardif", "is_error": False},  # arrive APRÈS result
+    ]
+    bridge = ChatBridge("cu2", store, _factory([script]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("go")
+    await _drain_until(q, "tool_result")  # le synthétique du balayage de fin de tour
+    await asyncio.sleep(0.05)  # laisse le tool_result tardif être (ou non) traité
+    recs = await store.read_since(0)
+    trs = [r for r in recs if r["type"] == "tool_result" and r["id"] == "Z"]
+    assert len(trs) == 1, f"un seul tool_result pour Z (le synthétique), eu : {len(trs)}"
+    assert trs[0]["is_error"] is True  # la carte reste close 'error', pas rouverte par le tardif
+    await bridge.shutdown()
+
+
 async def test_text_only_turn_unchanged(tmp_path):
     store = ConversationStore(tmp_path, "ct3")
     script = [

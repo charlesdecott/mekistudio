@@ -145,6 +145,8 @@ class ChatBridge:
                         await self._finalize_in_flight()
                 elif kind == "tool_result":
                     async with self._lock:
+                        if self._turn_finalized:
+                            continue  # tour déjà clos par le synthétique (D8) -> pas de ré-ouverture (spec §4.2)
                         rec = await self._store.append(
                             events.tool_result(ev["id"], ev.get("output", ""), bool(ev.get("is_error")))
                         )
@@ -196,6 +198,11 @@ class ChatBridge:
         au message_start suivant (défensif) et en fin de tour."""
         if self._in_flight is None:
             return
+        # Un stop demandé prime sur le 'success' par défaut : une bulle close au message_stop (ou au
+        # message_start défensif) APRÈS l'interrupt doit refléter l'interruption, pas un faux 'success'
+        # (U1). Le chemin 'error' (passé explicitement) et 'interrupted' (depuis _end_turn) intacts.
+        if self._stop_requested and status == "success":
+            status = "interrupted"
         rec = await self._store.append(events.assistant_message(self._in_flight["text"], status))
         self._broadcast(events.message_stop(self._in_flight["message_id"], rec["seq"], status))
         self._in_flight = None
