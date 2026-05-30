@@ -62,6 +62,7 @@
     let state = MekiChat.createState();
     let ws = null;
     let generation = 0;
+    let live = false; // passe true au marqueur 'attached' -> on ne déclenche PAS d'impulsion au replay
     let intentionalClose = false;
     let backoff = 500;
     let reconnectTimer = null;
@@ -182,12 +183,30 @@
 
     function applyEvent(ev) {
       MekiChat.reduce(state, ev);
+      if (live) maybeImpulse(ev); // déclenche les comètes/glows seulement en live (pas au replay)
       // fast-path streaming : markdown live de la SEULE bulle en vol (throttlé).
       if (ev.type === 'text_delta' && streamEl && streamMid === ev.message_id && state.inFlight) {
         scheduleStreamRender();
         return;
       }
       render();
+    }
+
+    // Enrichit un tool_result avec {name, file_path} (via toolsById), mappe vers une intention pure,
+    // et la dispatch au canvas. (tool_result ne porte que {id, output, is_error}.)
+    function maybeImpulse(ev) {
+      let e = ev;
+      if (ev.type === 'tool_result') {
+        const t = state.toolsById[ev.id];
+        e = {
+          type: 'tool_result',
+          is_error: !!ev.is_error,
+          name: t && t.name,
+          file_path: t && t.input && t.input.file_path,
+        };
+      }
+      const intent = window.MekiImpulses && window.MekiImpulses.impulseFor(e);
+      if (intent) document.dispatchEvent(new CustomEvent('meki:impulse', { detail: intent }));
     }
 
     // --- WebSocket ---
@@ -197,6 +216,7 @@
 
     function connect() {
       const myGen = ++generation;
+      live = false; // réinitialise à chaque (re)connexion -> le replay ne déclenche pas d'impulsions
       intentionalClose = false;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(proto + '://' + location.host + '/ws/chat/' + convId);
@@ -212,6 +232,7 @@
         if (myGen !== generation) return; // socket périmée (clear/destroy)
         const ev = JSON.parse(e.data);
         if (ev.type === 'cleared') { rotateTo(ev.conversation_id); return; }
+        if (ev.type === 'attached') { live = true; return; }
         applyEvent(ev);
       });
       ws.addEventListener('close', () => {
