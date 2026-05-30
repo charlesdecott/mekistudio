@@ -196,3 +196,32 @@ test('cablesOverlap: deux câbles quasi-confondus vs croisement', () => {
   assert.equal(C.cablesOverlap(c1, close, G), true);
   assert.equal(C.cablesOverlap(c1, crossing, G), false);
 });
+
+// --- pathBetween : chemin orienté dans l'arbre source_id (impulsions) ---
+const TREE = {
+  k: { id: 'k', source: null },
+  e: { id: 'e', source: 'k' },
+  a: { id: 'a', source: 'e' },
+  b: { id: 'b', source: 'e' },
+};
+test('pathBetween: from==to -> []', () => {
+  assert.deepEqual(C.pathBetween(TREE, 'a', 'a'), []);
+});
+test('pathBetween: descente pure kernel -> feuille', () => {
+  assert.deepEqual(C.pathBetween(TREE, 'k', 'a'),
+    [{ childId: 'e', parentId: 'k', dir: 'down' }, { childId: 'a', parentId: 'e', dir: 'down' }]);
+});
+test('pathBetween: montée pure feuille -> kernel', () => {
+  assert.deepEqual(C.pathBetween(TREE, 'a', 'k'),
+    [{ childId: 'a', parentId: 'e', dir: 'up' }, { childId: 'e', parentId: 'k', dir: 'up' }]);
+});
+test('pathBetween: frère -> frère (montée puis descente via LCA)', () => {
+  assert.deepEqual(C.pathBetween(TREE, 'a', 'b'),
+    [{ childId: 'a', parentId: 'e', dir: 'up' }, { childId: 'b', parentId: 'e', dir: 'down' }]);
+});
+test('pathBetween: composantes disjointes -> null', () => {
+  assert.equal(C.pathBetween({ a: { id: 'a', source: null }, b: { id: 'b', source: null } }, 'a', 'b'), null);
+});
+test('pathBetween: cycle -> null (pas de boucle infinie)', () => {
+  assert.equal(C.pathBetween({ a: { id: 'a', source: 'b' }, b: { id: 'b', source: 'a' } }, 'a', 'b'), null);
+});

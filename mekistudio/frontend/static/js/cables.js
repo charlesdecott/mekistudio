@@ -256,10 +256,42 @@
     return false;
   }
 
+  // Chaîne d'ancêtres [id, parent, ..., racine] via source_id ; null si cycle.
+  function ancestorChain(nodesById, id) {
+    const chain = [], seen = new Set();
+    let cur = id;
+    while (cur != null && nodesById[cur]) {
+      if (seen.has(cur)) return null; // cycle
+      seen.add(cur);
+      chain.push(cur);
+      cur = nodesById[cur].source || null;
+    }
+    return chain;
+  }
+
+  // Câbles ORIENTÉS du chemin from->to : {childId, parentId, dir} (dir='up' enfant->parent
+  // en montée, 'down' parent->enfant en descente). [] si from==to ; null si disjoint ou cycle.
+  function pathBetween(nodesById, fromId, toId) {
+    if (fromId === toId) return [];
+    const a = ancestorChain(nodesById, fromId);
+    const b = ancestorChain(nodesById, toId);
+    if (!a || !b) return null;
+    const bIdx = new Map(b.map((id, i) => [id, i]));
+    let ia = -1, ib = -1;
+    for (let i = 0; i < a.length; i++) {
+      if (bIdx.has(a[i])) { ia = i; ib = bIdx.get(a[i]); break; }
+    }
+    if (ia === -1) return null; // pas d'ancêtre commun -> composantes disjointes
+    const segs = [];
+    for (let i = 0; i < ia; i++) segs.push({ childId: a[i], parentId: a[i + 1], dir: 'up' });
+    for (let i = ib - 1; i >= 0; i--) segs.push({ childId: b[i], parentId: b[i + 1], dir: 'down' });
+    return segs;
+  }
+
   const MekiCables = {
     STUB, GAP_LANE, MARGE, HIDE_DIST, RIBBON_GAP, adaptiveSide, sideAnchor, assignLanes, subwayPoints, pointsToPath, cableClass,
     segHitsBox, pathHits, routeAround, diagOf, diagsOverlap, segBBox, bboxesOverlap,
-    route45OrNull, routeAvoiding, segOverlap, cablesOverlap,
+    route45OrNull, routeAvoiding, segOverlap, cablesOverlap, pathBetween,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiCables;
   if (typeof window !== 'undefined') window.MekiCables = MekiCables;
