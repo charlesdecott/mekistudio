@@ -18,7 +18,6 @@ document.addEventListener('alpine:init', () => {
     _settingsTree: null,
     _editors: {},            // états des nodes éditeur, indexés par node id
     _zTop: 0,                // dernier z-index attribué (premier plan au clic)
-    _editorSpawns: 0,        // éditeurs en cours de spawn (réserve la position en cascade)
     panning: false,
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
@@ -37,9 +36,28 @@ document.addEventListener('alpine:init', () => {
       if (v) this.view = v;
       const nodes = state.nodes || [];
       this.renderNodes(nodes);
+      this.reconcileOverlaps();   // sépare les nodes hérités qui se chevauchent (zéro recouvrement)
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
       this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
+    },
+    // Passe ordonnée déterministe : figés d'abord (murs), puis mobiles triés par id ;
+    // chaque node placé devient obstacle pour les suivants. Persiste les déplacés.
+    reconcileOverlaps() {
+      const C = window.MekiCollision;
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')];
+      const fixed = wraps.filter((w) => w.dataset.movable === 'false');
+      const movable = wraps.filter((w) => w.dataset.movable !== 'false')
+        .sort((a, b) => (a.dataset.id < b.dataset.id ? -1 : 1));
+      const placed = fixed.map((w) => this._homeBox(w));
+      for (const w of movable) {
+        const home = this._homeBox(w);
+        if (C.isFree(home, placed, C.GAP)) { placed.push(home); continue; }
+        const spot = C.findFreeSpot(home, { w: home.w, h: home.h }, placed, C.GAP);
+        w.style.left = spot.x + 'px'; w.style.top = spot.y + 'px';
+        placed.push({ x: spot.x, y: spot.y, w: home.w, h: home.h });
+        this._persistPos(w.dataset.id, spot.x, spot.y);
+      }
     },
 
     // Rendu des nodes en DOM direct : Alpine gère le pan/zoom du canvas, le
@@ -298,6 +316,14 @@ document.addEventListener('alpine:init', () => {
               relogged.push(w.dataset.id);
             } else { this.clearTranslate(w); obstacles.push(home); }
           }
+        } else if (resizing && moved) {
+          // pousse-et-reste : fige les voisins poussés en home définitif (D3), persiste.
+          this.$root.querySelectorAll('.node-wrap').forEach((w) => {
+            if (w === wrap || !(w._tx || w._ty)) return;
+            const nx = (parseFloat(w.style.left) || 0) + w._tx, ny = (parseFloat(w.style.top) || 0) + w._ty;
+            this.clearTranslate(w); w.style.left = nx + 'px'; w.style.top = ny + 'px';
+            this._persistPos(w.dataset.id, nx, ny);
+          });
         } else {
           this.$root.querySelectorAll('.node-wrap').forEach((w) => { if (w !== wrap) this.clearTranslate(w); });
         }
@@ -320,6 +346,7 @@ document.addEventListener('alpine:init', () => {
         }
         this.applyBox(wrap, node);
         if (moving) this._pushNeighbors(wrap, node, orig); // écarte les voisins (peut clamper A)
+        if (resizing) this._pushOnResize(wrap, node);      // pousse bas/droite (peut borner la taille)
         this.drawCables();                                  // re-route live (positions rendues)
       };
       document.addEventListener('mousemove', onMove);
@@ -365,6 +392,24 @@ document.addEventListener('alpine:init', () => {
           this.setTranslate(w, placed.x, placed.y);
           decided.push({ x: home.x + placed.x, y: home.y + placed.y, w: home.w, h: home.h });
         } else { clampA(home); decided.push(home); }
+      }
+    },
+    // Au resize (ancre haut-gauche), pousse les voisins recouverts vers le bas/droite ;
+    // ils RESTENT écartés (figés au lâcher). Borne la taille si un 3e node bloque.
+    _pushOnResize(wrap, node) {
+      const C = window.MekiCollision;
+      const grown = { x: node.x, y: node.y, w: node.w, h: node.h };
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap);
+      for (const w of wraps) {
+        if (w.dataset.movable === 'false') continue;
+        const home = this._homeBox(w);
+        if (!C.intersects(grown, home, C.GAP)) continue;
+        const v = C.pushVector(grown, home, C.GAP);
+        const others = [];
+        wraps.forEach((o) => { if (o !== w) others.push(this.boxOf(o)); });
+        const target = { x: home.x + v.x, y: home.y + v.y, w: home.w, h: home.h };
+        if (C.isFree(target, others, C.GAP)) this.setTranslate(w, v.x, v.y);
+        else { node.w = this.clampW(node, home.x - C.GAP - node.x); this.applyBox(wrap, node); }
       }
     },
     async _persistPos(id, x, y) {
@@ -606,13 +651,10 @@ document.addEventListener('alpine:init', () => {
     // Double-clic sur un fichier -> spawn un NOUVEAU node éditeur près de
     // l'explorateur (en cascade), ouvre le fichier dedans, le rend.
     async openFileInNewEditor(path) {
-      // réserve une position de cascade SYNCHRONEMENT (avant les await) : deux
-      // double-clics rapprochés donnent des positions distinctes.
-      const slot = this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]').length
-        + this._editorSpawns;
-      this._editorSpawns++;
+      // place le nouvel éditeur dans le 1er TROU LIBRE près de l'explorateur (réservé
+      // synchroniquement pour que 2 double-clics rapprochés ne visent pas le même trou).
+      const pos = this.editorSpawnPos();
       try {
-        const pos = this.editorPosAt(slot);
         let node;
         try {
           const r = await fetch('/api/canvas/nodes', {
@@ -642,19 +684,24 @@ document.addEventListener('alpine:init', () => {
         if (world) world.appendChild(this.renderNode(node));
         this.drawCables(); // câble du nouvel éditeur -> explorateur
       } finally {
-        this._editorSpawns--;
+        this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
     },
-    editorPosAt(slot) {
-      // à droite de l'explorateur, décalé en cascade selon le slot réservé.
+    // 1er emplacement libre pour un éditeur, ancré à droite de l'explorateur ; évite les
+    // nodes existants ET les spots déjà réservés (spawns concurrents).
+    editorSpawnPos() {
+      const C = window.MekiCollision;
       const ex = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
       let bx = 360, by = 0, bw = 300;
-      if (ex) {
-        bx = parseFloat(ex.style.left) || 0;
-        by = parseFloat(ex.style.top) || 0;
-        bw = ex.offsetWidth || 300;
-      }
-      return { x: bx + bw + 40 + slot * 28, y: by + slot * 28 };
+      if (ex) { bx = parseFloat(ex.style.left) || 0; by = parseFloat(ex.style.top) || 0; bw = ex.offsetWidth || 300; }
+      const anchor = { x: bx + bw + 40, y: by };
+      const others = [];
+      this.$root.querySelectorAll('.node-wrap').forEach((w) => others.push(this.boxOf(w)));
+      this._pendingSpots.forEach((s) => others.push(s));
+      const size = { w: 520, h: 440 }; // EDITOR_SPAWN_SIZE — refléter file_editor.py
+      const spot = C.findFreeSpot(anchor, size, others, C.GAP);
+      this._pendingSpots.push({ x: spot.x, y: spot.y, w: size.w, h: size.h });
+      return spot;
     },
     renderComponent(c, node) {
       if (!c || !c.type) return document.createComment('vide');
