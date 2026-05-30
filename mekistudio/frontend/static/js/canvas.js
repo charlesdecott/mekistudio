@@ -23,7 +23,8 @@ document.addEventListener('alpine:init', () => {
     last: { x: 0, y: 0 },
     view: { x: 0, y: 0, zoom: 1 },
     _saveTimer: null,
-    _dragBoxes: null,        // snapshot des boîtes pendant un drag (évite un reflow/frame)
+    _dragDir: { x: 0, y: 0 }, // vecteur cumulatif saisie->curseur (sens du drag pour la collision)
+    _pendingSpots: [],       // spots d'éditeurs réservés (spawns concurrents)
 
     async init() {
       let state = {};
@@ -71,6 +72,20 @@ document.addEventListener('alpine:init', () => {
       wrap.style.height = node.h != null ? node.h + 'px' : '';
       wrap.classList.toggle('sized', node.w != null || node.h != null);
     },
+    // Déplacement TRANSITOIRE (coords monde) d'un node poussé, sans toucher son home.
+    setTranslate(wrap, dx, dy) {
+      wrap._tx = dx; wrap._ty = dy;
+      wrap.style.transform = (dx || dy) ? `translate(${dx}px, ${dy}px)` : '';
+    },
+    clearTranslate(wrap) { this.setTranslate(wrap, 0, 0); },
+    // Box RENDUE en coords monde = home (style.left/top) + translate transitoire.
+    boxOf(wrap) {
+      return {
+        x: (parseFloat(wrap.style.left) || 0) + (wrap._tx || 0),
+        y: (parseFloat(wrap.style.top) || 0) + (wrap._ty || 0),
+        w: wrap.offsetWidth, h: wrap.offsetHeight,
+      };
+    },
 
     // Layer SVG unique des câbles, premier enfant de .world. Idempotent.
     ensureCablesLayer() {
@@ -90,8 +105,7 @@ document.addEventListener('alpine:init', () => {
       const map = new Map();
       this.$root.querySelectorAll('.node-wrap').forEach((w) => {
         map.set(w.dataset.id, {
-          box: { x: parseFloat(w.style.left) || 0, y: parseFloat(w.style.top) || 0,
-                 w: w.offsetWidth, h: w.offsetHeight },
+          box: this.boxOf(w),  // position RENDUE (home + translate) -> câbles suivent les nodes poussés
           kind: w.dataset.kind || '',
           source: w.dataset.source || '',
         });
@@ -242,6 +256,9 @@ document.addEventListener('alpine:init', () => {
       if (!moving && !resizing) return; // node verrouillé pour cet outil
       e.preventDefault();
       this.selectNode(wrap);
+      this.clearTranslate(wrap);          // on drague depuis le home, jamais d'une position écartée
+      wrap.classList.add('dragging');
+      this._dragDir = { x: 0, y: 0 };
 
       const z = this.view.zoom || 1;
       const sx = e.clientX, sy = e.clientY;
@@ -253,7 +270,6 @@ document.addEventListener('alpine:init', () => {
         w: node.w != null ? node.w : wrap.offsetWidth,
         h: node.h != null ? node.h : wrap.offsetHeight,
       };
-      this._dragBoxes = this.nodeBoxes(); // boîtes des AUTRES nodes figées le temps du drag
       let moved = false;
       let done = false;
       const finish = () => {
@@ -261,35 +277,103 @@ document.addEventListener('alpine:init', () => {
         done = true;
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', finish);
-        if (moved) this.persistNode(node); // pas de POST sur un simple clic
-        this._dragBoxes = null;
-        this.drawCables(); // re-route final avec lecture fraîche du DOM
+        wrap.classList.remove('dragging');
+        const C = window.MekiCollision;
+        const relogged = [];
+        if (moving && moved) {
+          // PASSE FINALE (seule autorité de l'invariant) : tout voisin dont le home recoupe
+          // la box finale de A est RELOGÉ définitivement (findFreeSpot) ; les autres reviennent.
+          const finalA = { x: node.x, y: node.y, w: wrap.offsetWidth, h: wrap.offsetHeight };
+          const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap);
+          const obstacles = [finalA];
+          for (const w of wraps) {
+            const home = this._homeBox(w);
+            if (w.dataset.movable === 'false') { this.clearTranslate(w); obstacles.push(home); continue; }
+            if (C.intersects(finalA, home, C.GAP)) {
+              const others = obstacles.concat(wraps.filter((o) => o !== w).map((o) => this._homeBox(o)));
+              const spot = C.findFreeSpot(home, { w: home.w, h: home.h }, others, C.GAP);
+              this.clearTranslate(w);
+              w.style.left = spot.x + 'px'; w.style.top = spot.y + 'px';
+              obstacles.push({ x: spot.x, y: spot.y, w: home.w, h: home.h });
+              relogged.push(w.dataset.id);
+            } else { this.clearTranslate(w); obstacles.push(home); }
+          }
+        } else {
+          this.$root.querySelectorAll('.node-wrap').forEach((w) => { if (w !== wrap) this.clearTranslate(w); });
+        }
+        for (const id of relogged) {
+          const w = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+          if (w) this._persistPos(id, parseFloat(w.style.left) || 0, parseFloat(w.style.top) || 0);
+        }
+        if (moved) this.persistNode(node); // A persisté en DERNIER (cohérence si échec réseau partiel)
+        this.drawCables();
       };
       const onMove = (ev) => {
         if (!(ev.buttons & 1)) return finish(); // bouton relâché hors fenêtre
         moved = true;
         const dx = (ev.clientX - sx) / z; // px écran -> px monde
         const dy = (ev.clientY - sy) / z;
-        if (moving) { node.x = orig.x + dx; node.y = orig.y + dy; }
+        if (moving) { node.x = orig.x + dx; node.y = orig.y + dy; this._dragDir = { x: dx, y: dy }; }
         if (resizing) {
           node.w = this.clampW(node, orig.w + dx);
           node.h = this.clampH(node, orig.h + dy);
         }
         this.applyBox(wrap, node);
-        // re-route : seule la boîte du node manipulé change ; les autres viennent du cache.
-        if (this._dragBoxes) {
-          const m = new Map(this._dragBoxes);
-          const prev = m.get(node.id) || { kind: wrap.dataset.kind, source: wrap.dataset.source };
-          m.set(node.id, {
-            box: { x: node.x || 0, y: node.y || 0,
-                   w: node.w != null ? node.w : orig.w, h: node.h != null ? node.h : orig.h },
-            kind: prev.kind, source: prev.source,
-          });
-          this.drawCablesFrom(m);
-        }
+        if (moving) this._pushNeighbors(wrap, node, orig); // écarte les voisins (peut clamper A)
+        this.drawCables();                                  // re-route live (positions rendues)
       };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', finish);
+    },
+    _homeBox(w) {
+      return { x: parseFloat(w.style.left) || 0, y: parseFloat(w.style.top) || 0,
+               w: w.offsetWidth, h: w.offsetHeight };
+    },
+    // Écarte (translate transitoire) les voisins que A percute ; revient avec hystérésis ;
+    // kernel = mur (clamp A) ; les 2 côtés bloqués -> clamp A (no-cascade).
+    _pushNeighbors(wrap, node, orig) {
+      const C = window.MekiCollision;
+      const moverBox = { x: node.x, y: node.y, w: orig.w, h: orig.h };
+      const decided = [];
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap);
+      const clampA = (home) => {
+        const cl = C.clampAgainst({ x: orig.x, y: orig.y },
+          { x: node.x, y: node.y, w: orig.w, h: orig.h }, home, C.GAP);
+        node.x = cl.x; node.y = cl.y; this.applyBox(wrap, node);
+        moverBox.x = node.x; moverBox.y = node.y;
+      };
+      for (const w of wraps) {
+        const home = this._homeBox(w);
+        if (!C.intersects(moverBox, home, C.GAP)) {
+          if ((w._tx || w._ty) && !C.intersects(moverBox, home, C.GAP + C.EPS)) this.clearTranslate(w);
+          decided.push(this.boxOf(w));
+          continue;
+        }
+        if (w.dataset.movable === 'false') { clampA(home); decided.push(home); continue; }
+        const obstacles = [moverBox, ...decided];
+        wraps.forEach((o) => {
+          if (o === w || o._tx || o._ty) return;
+          obstacles.push(this._homeBox(o));
+        });
+        const cands = C.partVector(moverBox, home, this._dragDir, C.GAP);
+        let placed = null;
+        for (const v of cands) {
+          const target = { x: home.x + v.x, y: home.y + v.y, w: home.w, h: home.h };
+          if (C.isFree(target, obstacles, C.GAP)) { placed = v; break; }
+        }
+        if (placed) {
+          this.setTranslate(w, placed.x, placed.y);
+          decided.push({ x: home.x + placed.x, y: home.y + placed.y, w: home.w, h: home.h });
+        } else { clampA(home); decided.push(home); }
+      }
+    },
+    async _persistPos(id, x, y) {
+      try {
+        await fetch('/api/canvas/nodes/' + id, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ x, y }),
+        });
+      } catch (e) { /* best-effort ; le boot réconcilie */ }
     },
     clampW(node, w) { w = Math.max(140, w); return node.max_w ? Math.min(w, node.max_w) : w; },
     clampH(node, h) { h = Math.max(80, h); return node.max_h ? Math.min(h, node.max_h) : h; },
