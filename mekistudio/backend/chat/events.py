@@ -9,7 +9,7 @@ from mekistudio.backend.components.base import new_id  # ré-export (id stable, 
 
 __all__ = ["new_id", "now_ms", "DURABLE_TYPES"]
 
-DURABLE_TYPES = {"user_message", "assistant_message", "session", "error"}
+DURABLE_TYPES = {"user_message", "assistant_message", "session", "error", "tool_use", "tool_result"}
 
 
 def now_ms() -> int:
@@ -52,3 +52,12 @@ def queued(items: list[dict]) -> dict:
 
 def cleared(conversation_id: str) -> dict:
     return {"type": "cleared", "conversation_id": conversation_id}
+
+
+# --- outils (durables, seq'd ; brique D) ---
+def tool_use(id: str, name: str, input: dict) -> dict:
+    return {"type": "tool_use", "ts": now_ms(), "id": id, "name": name, "input": input}
+
+
+def tool_result(id: str, output: str, is_error: bool) -> dict:
+    return {"type": "tool_result", "ts": now_ms(), "id": id, "output": output, "is_error": is_error}
