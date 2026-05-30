@@ -498,6 +498,7 @@ document.addEventListener('alpine:init', () => {
       } finally { this._pulsing = false; }
     },
     // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
+    // Vitesse CONSTANTE (durée ∝ longueur, mouvement linéaire) : un câble long n'accélère pas.
     animateComet(seg) {
       return new Promise((resolve) => {
         const svg = this.ensureCablesLayer();
@@ -507,27 +508,52 @@ document.addEventListener('alpine:init', () => {
         const len = path.getTotalLength();
         const NS = 'http://www.w3.org/2000/svg';
         const dot = document.createElementNS(NS, 'circle');
-        dot.setAttribute('class', 'comet'); dot.setAttribute('r', '5.5'); svg.appendChild(dot);
+        dot.setAttribute('class', 'comet'); dot.setAttribute('r', '9'); svg.appendChild(dot);
+        // Traînée plus longue. Les billes suivent l'HISTORIQUE des positions de l'orbe
+        // (et non un décalage rigide) : elles restent là où l'orbe est passée et s'estompent
+        // en s'éloignant -> effet de decay « reste un peu lumineuse après son passage ».
+        const TRAIL = 22, STRIDE = 2; // STRIDE = nb de frames entre deux billes
         const trail = [];
-        for (let i = 0; i < 14; i++) {
+        for (let i = 0; i < TRAIL; i++) {
           const c = document.createElementNS(NS, 'circle');
-          c.setAttribute('class', 'comet-trail'); c.setAttribute('r', (5 - i * 0.3).toFixed(1));
-          c.setAttribute('opacity', (0.55 * (1 - i / 14)).toFixed(2)); svg.appendChild(c); trail.push(c);
+          c.setAttribute('class', 'comet-trail');
+          c.setAttribute('r', (7.5 * (1 - i / TRAIL) + 1).toFixed(1));
+          c.setAttribute('opacity', (0.6 * Math.pow(1 - i / TRAIL, 1.4)).toFixed(3));
+          svg.appendChild(c); trail.push(c);
         }
-        const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-        const dur = 850; let start = null;
+        const hist = []; // positions récentes de l'orbe (frame par frame), plus récente en tête
+        const place = () => trail.forEach((c, i) => {
+          const h = hist[Math.min(hist.length - 1, (i + 1) * STRIDE)];
+          if (h) { c.setAttribute('cx', h.x); c.setAttribute('cy', h.y); }
+        });
+        // La traînée s'éteint en douceur (decay) APRÈS le passage, sans retarder le segment suivant.
+        const fadeOut = () => {
+          const els = [dot, ...trail];
+          const ops = els.map((c) => parseFloat(c.getAttribute('opacity') || '1'));
+          let fstart = null;
+          const FADE = 320;
+          const fstep = (ts) => {
+            if (fstart === null) fstart = ts;
+            const k = Math.min(1, (ts - fstart) / FADE);
+            els.forEach((c, i) => c.setAttribute('opacity', (ops[i] * (1 - k)).toFixed(3)));
+            if (k < 1) requestAnimationFrame(fstep); else els.forEach((c) => c.remove());
+          };
+          requestAnimationFrame(fstep);
+        };
+        const SPEED = 0.7; // px/ms : vitesse constante quelle que soit la longueur du câble
+        const dur = Math.max(240, len / SPEED); // plancher pour les tout petits câbles
+        let start = null;
         const step = (ts) => {
           if (start === null) start = ts;
-          const t = Math.min(1, (ts - start) / dur), e = ease(t);
-          const at = seg.dir === 'up' ? e * len : (1 - e) * len; // sens du flux
+          const t = Math.min(1, (ts - start) / dur); // LINÉAIRE -> vitesse constante
+          const at = seg.dir === 'up' ? t * len : (1 - t) * len; // sens du flux
           const p = path.getPointAtLength(at);
           dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
-          trail.forEach((c, i) => {
-            const back = seg.dir === 'up' ? Math.max(0, at - (i + 1) * 11) : Math.min(len, at + (i + 1) * 11);
-            const q = path.getPointAtLength(back); c.setAttribute('cx', q.x); c.setAttribute('cy', q.y);
-          });
+          hist.unshift({ x: p.x, y: p.y });
+          if (hist.length > TRAIL * STRIDE + 1) hist.pop();
+          place();
           if (t < 1) requestAnimationFrame(step);
-          else { dot.remove(); trail.forEach((c) => c.remove()); resolve(); }
+          else { resolve(); fadeOut(); } // arrivée : on enchaîne le segment + rémanence en fond
         };
         requestAnimationFrame(step);
       });

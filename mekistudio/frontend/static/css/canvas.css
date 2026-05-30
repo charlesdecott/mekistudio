@@ -233,8 +233,8 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
   border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 13px; line-height: 1.4;
 }
 .node-toolbar-btn:hover { background: #2a2150; }
-.comet { fill: #fff7da; }
-.comet-trail { fill: #ffce6e; }
+.comet { fill: #fff7da; filter: drop-shadow(0 0 7px rgba(255, 206, 110, .95)); }
+.comet-trail { fill: #ffce6e; filter: drop-shadow(0 0 4px rgba(255, 180, 80, .7)); }
 .node-wrap.glow-soft   { box-shadow: 0 0 12px 2px rgba(255, 210, 122, .45); }
 .node-wrap.glow-strong { box-shadow: 0 0 26px 6px rgba(255, 210, 122, .95); }
 .node-wrap.glow-notif  { animation: meki-notif 1.25s ease-in-out infinite; }
