@@ -220,6 +220,8 @@ class ChatBridge:
             for tid in self._turn_tool_ids - self._turn_tool_results:
                 tr = await self._store.append(events.tool_result(tid, "interrompu", True))
                 self._broadcast(tr)
+            # fin de tour visible (brique F : déclenche le glow 'Stop'). Transient.
+            self._broadcast(events.turn_end("interrupted" if self._stop_requested else "success"))
             if self._pending:  # enchaînement de la file
                 nxt = self._pending.pop(0)
                 self._broadcast_queued()
@@ -245,6 +247,8 @@ class ChatBridge:
             if self._state == "running" and self._in_flight is not None:
                 queue.put_nowait(events.message_start(self._in_flight["message_id"]))
                 queue.put_nowait(events.text_delta(self._in_flight["message_id"], self._in_flight["text"]))
+            # tout ce qui précède = replay/catch-up ; les events SUIVANTS sont 'live' (brique F)
+            queue.put_nowait(events.attached())
             self._subscribers.add(queue)
             if on_drop is not None:
                 self._drop_events[queue] = on_drop

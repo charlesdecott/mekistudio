@@ -1,5 +1,6 @@
 import asyncio
 
+from mekistudio.backend.chat import events
 from mekistudio.backend.chat.bridge import ChatBridge
 from mekistudio.backend.chat.store import ConversationStore
 
@@ -216,8 +217,8 @@ async def test_start_connect_error_degrades(tmp_path):
     q = asyncio.Queue()
     await bridge.attach(q, 0)
     await bridge.submit_prompt("hi")
-    ev = await asyncio.wait_for(q.get(), 2.0)
-    assert ev["type"] == "error" and "claude" in ev["message"].lower()
+    ev = await _drain_until(q, "error")
+    assert "claude" in ev["message"].lower()
     await bridge.shutdown()
 
 
@@ -420,4 +421,40 @@ async def test_text_only_turn_unchanged(tmp_path):
     recs = await store.read_since(0)
     assert [r["type"] for r in recs].count("assistant_message") == 1
     assert all(r["type"] not in ("tool_use", "tool_result") for r in recs)
+    await bridge.shutdown()
+
+
+async def test_turn_end_broadcast_not_persisted(tmp_path):
+    store = ConversationStore(tmp_path, "cte")
+    script = [
+        {"kind": "message_start"}, {"kind": "delta", "text": "ok"},
+        {"kind": "assistant", "text": "ok", "tools": []},
+        {"kind": "result", "subtype": "success", "session_id": "s"},
+    ]
+    bridge = ChatBridge("cte", store, _factory([script]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("salut")
+    te = await _drain_until(q, "turn_end")
+    assert te["status"] == "success"
+    recs = await store.read_since(0)
+    assert all(r["type"] != "turn_end" for r in recs)  # transient : jamais persisté
+    await bridge.shutdown()
+
+
+async def test_attached_marker_after_replay(tmp_path):
+    store = ConversationStore(tmp_path, "cat")
+    await store.append(events.user_message("vieux message"))  # historique à rejouer
+    bridge = ChatBridge("cat", store, _factory([]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    seen = []
+    for _ in range(5):
+        seen.append((await asyncio.wait_for(q.get(), 2.0))["type"])
+        if seen[-1] == "attached":
+            break
+    assert "user_message" in seen
+    assert seen[-1] == "attached"  # le marqueur arrive APRÈS le replay
     await bridge.shutdown()
