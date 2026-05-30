@@ -13,22 +13,42 @@ from mekistudio.backend.chat.store import ConversationStore
 READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "LS"]
 
 
-def build_options(repo_root: Path, store: ConversationStore) -> Any:
-    """ClaudeAgentOptions : outils LECTURE SEULE, confinés au repo (hook PreToolUse), streaming.
-    `allowed_tools` auto-approuve l'in-repo (zéro popup) ; le hook bloque l'hors-repo (il tourne
-    AVANT les règles de permission). `cwd=repo_root` borne les patterns relatifs (obligatoire)."""
+def make_hook_emitter(name: str, on_hook):
+    """Hook 'émetteur' : signale le hook au bridge via on_hook(name, data), sans rien bloquer.
+    Renvoie {} (n'influence pas la permission) et NE LÈVE JAMAIS. Même mécanisme HookMatcher que
+    le guard (prouvé en brique D)."""
+    async def emit(input_data, tool_use_id, context):
+        try:
+            if on_hook is not None:
+                on_hook(name, input_data or {})
+        except Exception:
+            pass
+        return {}
+
+    return emit
+
+
+def build_options(repo_root: Path, store: ConversationStore, on_hook=None) -> Any:
+    """ClaudeAgentOptions : outils LECTURE SEULE confinés (hook PreToolUse), streaming, + hooks
+    émetteurs (brique F) qui signalent les hooks au bridge via on_hook (transient, non persisté)."""
     from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
     from mekistudio.backend.chat.guard import make_repo_guard
 
-    root = Path(repo_root) if repo_root is not None else Path.cwd()  # None -> cwd (tests faux client)
+    root = Path(repo_root) if repo_root is not None else Path.cwd()
+    # PreToolUse : le guard d'ABORD (confinement, un deny gagne), puis l'émetteur (visibilité).
+    hooks = {
+        "PreToolUse": [HookMatcher(matcher=None, hooks=[make_repo_guard(root), make_hook_emitter("PreToolUse", on_hook)])],
+    }
+    for hk in ("PostToolUse", "Stop", "Notification", "UserPromptSubmit", "SubagentStop", "PreCompact"):
+        hooks[hk] = [HookMatcher(matcher=None, hooks=[make_hook_emitter(hk, on_hook)])]
     return ClaudeAgentOptions(
         cwd=str(root),
         tools=READ_ONLY_TOOLS,
         allowed_tools=READ_ONLY_TOOLS,
         permission_mode="default",
-        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[make_repo_guard(root)])]},
-        setting_sources=[],  # isole des settings utilisateur/repo (confirmé par le smoke)
+        hooks=hooks,
+        setting_sources=[],
         include_partial_messages=True,
         resume=store.meta().get("claude_session_id"),
     )

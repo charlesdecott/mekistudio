@@ -63,7 +63,7 @@ class ChatBridge:
         from mekistudio.backend.chat.options import build_options
 
         try:
-            options = build_options(self._repo_root, self._store)
+            options = build_options(self._repo_root, self._store, self._emit_hook)
             self._client = self._factory(options)
             await self._client.connect(self._message_stream())
             self._consume_task = asyncio.create_task(self._consume())
@@ -86,6 +86,11 @@ class ChatBridge:
                 ev_drop = self._drop_events.pop(q, None)
                 if ev_drop is not None:
                     ev_drop.set()
+
+    def _emit_hook(self, name: str, data: dict) -> None:
+        """Appelé par un hook émetteur (même boucle asyncio que _consume) -> diffuse un hook_fired
+        transient. put_nowait non bloquant -> pas de verrou requis (cohérent avec le guard)."""
+        self._broadcast(events.hook_fired(name, dict(data) if isinstance(data, dict) else {"raw": data}))
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         self._subscribers.discard(queue)

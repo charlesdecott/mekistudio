@@ -458,3 +458,17 @@ async def test_attached_marker_after_replay(tmp_path):
     assert "user_message" in seen
     assert seen[-1] == "attached"  # le marqueur arrive APRÈS le replay
     await bridge.shutdown()
+
+
+async def test_emit_hook_broadcasts_hook_fired_not_persisted(tmp_path):
+    store = ConversationStore(tmp_path, "chk")
+    bridge = ChatBridge("chk", store, _factory([]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    bridge._emit_hook("Notification", {"message": "coucou"})
+    ev = await _drain_until(q, "hook_fired")
+    assert ev["name"] == "Notification" and ev["data"] == {"message": "coucou"}
+    recs = await store.read_since(0)
+    assert all(r["type"] != "hook_fired" for r in recs)  # transient
+    await bridge.shutdown()
