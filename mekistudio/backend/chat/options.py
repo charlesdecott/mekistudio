@@ -65,6 +65,8 @@ class _SdkClient:
                 t = ev.get("type")
                 if t == "message_start":
                     yield {"kind": "message_start"}
+                elif t == "message_stop":
+                    yield {"kind": "message_stop"}  # fin d'un GROUPE (peut contenir N AssistantMessage)
                 elif t == "content_block_delta" and ev.get("delta", {}).get("type") == "text_delta":
                     yield {"kind": "delta", "text": ev["delta"].get("text", "")}
             elif name == "AssistantMessage":

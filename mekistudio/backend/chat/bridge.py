@@ -31,8 +31,8 @@ class ChatBridge:
         self._in_flight: dict | None = None  # {"message_id", "text"}
         self._turn_id: str | None = None
         self._stop_requested = False
-        # Tour multi-étapes (brique D) : une étape = un AssistantMessage.
-        self._step_finalized = False        # reset à chaque message_start
+        # Tour multi-étapes (brique D) : un GROUPE message_start..message_stop = une bulle, qui
+        # peut contenir PLUSIEURS AssistantMessage (un par bloc/outil parallèle).
         self._turn_finalized = False        # reset dans _start_turn
         self._turn_tool_ids: set = set()    # tool_use émis dans le tour
         self._turn_tool_results: set = set()  # tool_result reçus dans le tour
@@ -114,7 +114,6 @@ class ChatBridge:
         self._turn_id = events.new_id()
         self._stop_requested = False
         self._turn_finalized = False
-        self._step_finalized = False
         self._in_flight = None
         self._turn_tool_ids.clear()
         self._turn_tool_results.clear()
@@ -130,7 +129,7 @@ class ChatBridge:
                     await self._maybe_persist_session(ev.get("session_id"))
                 elif kind == "message_start":
                     async with self._lock:
-                        self._step_finalized = False
+                        await self._finalize_in_flight()  # défensif : ferme un groupe précédent non clos
                         self._in_flight = {"message_id": events.new_id(), "text": ""}
                         self._broadcast(events.message_start(self._in_flight["message_id"]))
                 elif kind == "delta":
@@ -140,7 +139,10 @@ class ChatBridge:
                             self._in_flight["text"] += chunk
                             self._broadcast(events.text_delta(self._in_flight["message_id"], chunk))
                 elif kind == "assistant":
-                    await self._finalize_step(ev.get("text", ""), ev.get("tools") or [])
+                    await self._accumulate_assistant(ev.get("text", ""), ev.get("tools") or [])
+                elif kind == "message_stop":
+                    async with self._lock:
+                        await self._finalize_in_flight()
                 elif kind == "tool_result":
                     async with self._lock:
                         rec = await self._store.append(
@@ -159,11 +161,7 @@ class ChatBridge:
             # passe en état 'error' -> les prompts suivants renvoient une erreur ; récupération
             # via ✨ Nouvelle session (clear -> nouveau bridge).
             async with self._lock:
-                if self._in_flight is not None and not self._step_finalized:
-                    self._step_finalized = True
-                    arec = await self._store.append(events.assistant_message(self._in_flight.get("text", ""), "error"))
-                    self._broadcast(events.message_stop(self._in_flight["message_id"], arec["seq"], "error"))
-                    self._in_flight = None
+                await self._finalize_in_flight("error")
                 erec = await self._store.append(events.error_event(f"Erreur de session : {exc}"))
                 self._broadcast(erec)
                 self._pending.clear()
@@ -178,24 +176,29 @@ class ChatBridge:
         rec = await self._store.append(events.session_event(sid))
         self._broadcast(rec)
 
-    async def _finalize_step(self, text: str, tools: list) -> None:
-        """Une ÉTAPE = un AssistantMessage (texte + 0..n outils), finalisée sur l'event assistant.
-        Le texte vient de l'EVENT (≠ squelette qui agrégeait un _final_text per-tour)."""
+    async def _accumulate_assistant(self, text: str, tools: list) -> None:
+        """Un AssistantMessage = UN bloc du groupe courant (texte OU un outil). On ACCUMULE
+        sans finaliser : la bulle se ferme au message_stop (ou au message_start suivant)."""
         async with self._lock:
-            if self._step_finalized:
-                return
-            self._step_finalized = True
-            inflight = self._in_flight
-            # Étape vide (aucun message_start, ni texte, ni outil) -> rien à afficher/persister.
-            if not (inflight is None and not text and not tools):
-                mid = (inflight or {}).get("message_id") or events.new_id()
-                rec = await self._store.append(events.assistant_message(text, "success"))
-                self._broadcast(events.message_stop(mid, rec["seq"], "success"))
+            if self._in_flight is None:  # sécurité : AssistantMessage sans message_start
+                self._in_flight = {"message_id": events.new_id(), "text": ""}
+                self._broadcast(events.message_start(self._in_flight["message_id"]))
+            if text:  # un bloc tool-only a text="" -> ne pas écraser le texte du groupe
+                self._in_flight["text"] = text
             for t in tools:
                 tu = await self._store.append(events.tool_use(t["id"], t["name"], t.get("input") or {}))
                 self._broadcast(tu)
                 self._turn_tool_ids.add(t["id"])
-            self._in_flight = None
+
+    async def _finalize_in_flight(self, status: str = "success") -> None:
+        """Ferme la bulle du GROUPE courant (persiste assistant_message + message_stop).
+        Idempotent (in_flight=None ensuite). Le CALLER tient le verrou. Appelée au message_stop,
+        au message_start suivant (défensif) et en fin de tour."""
+        if self._in_flight is None:
+            return
+        rec = await self._store.append(events.assistant_message(self._in_flight["text"], status))
+        self._broadcast(events.message_stop(self._in_flight["message_id"], rec["seq"], status))
+        self._in_flight = None
 
     async def _end_turn(self) -> None:
         """Fin de tour (ResultMessage SDK) : finalise une étape en vol restante (interrupt avant
@@ -205,12 +208,8 @@ class ChatBridge:
             if self._turn_finalized:
                 return
             self._turn_finalized = True
-            if self._in_flight is not None:
-                status = "interrupted" if self._stop_requested else "success"
-                mid = self._in_flight["message_id"]
-                rec = await self._store.append(events.assistant_message(self._in_flight.get("text", ""), status))
-                self._broadcast(events.message_stop(mid, rec["seq"], status))
-                self._in_flight = None
+            # étape en vol restante (ex. interrupt avant message_stop)
+            await self._finalize_in_flight("interrupted" if self._stop_requested else "success")
             for tid in self._turn_tool_ids - self._turn_tool_results:
                 tr = await self._store.append(events.tool_result(tid, "interrompu", True))
                 self._broadcast(tr)

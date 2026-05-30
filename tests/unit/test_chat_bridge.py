@@ -316,6 +316,37 @@ async def test_orphan_tool_closed_on_turn_end(tmp_path):
     await bridge.shutdown()
 
 
+async def test_parallel_tools_one_group(tmp_path):
+    # Le SDK livre UN AssistantMessage PAR bloc -> plusieurs AssistantMessage entre un même
+    # message_start et message_stop (outils parallèles). Tous les tool_use doivent être captés.
+    store = ConversationStore(tmp_path, "ctp")
+    script = [
+        {"kind": "message_start"},
+        {"kind": "assistant", "text": "", "tools": [{"id": "A", "name": "Read", "input": {"file_path": "a.py"}}]},
+        {"kind": "assistant", "text": "", "tools": [{"id": "B", "name": "Read", "input": {"file_path": "b.py"}}]},
+        {"kind": "assistant", "text": "", "tools": [{"id": "C", "name": "Read", "input": {"file_path": "c.py"}}]},
+        {"kind": "tool_result", "id": "A", "output": "x", "is_error": False},
+        {"kind": "tool_result", "id": "B", "output": "y", "is_error": False},
+        {"kind": "tool_result", "id": "C", "output": "z", "is_error": False},
+        {"kind": "message_stop"},
+        {"kind": "message_start"},
+        {"kind": "delta", "text": "Fini"},
+        {"kind": "assistant", "text": "Fini", "tools": []},
+        {"kind": "message_stop"},
+        {"kind": "result", "subtype": "success", "session_id": "s"},
+    ]
+    bridge = ChatBridge("ctp", store, _factory([script]), repo_root=tmp_path)
+    await bridge.start()
+    q = asyncio.Queue()
+    await bridge.attach(q, 0)
+    await bridge.submit_prompt("lis a b c")
+    await _drain_until(q, "message_stop")  # fin du groupe d'outils
+    recs = await store.read_since(0)
+    tu = [r for r in recs if r["type"] == "tool_use"]
+    assert {r["id"] for r in tu} == {"A", "B", "C"}, f"tool_use captés: {[r['id'] for r in tu]}"
+    await bridge.shutdown()
+
+
 async def test_text_only_turn_unchanged(tmp_path):
     store = ConversationStore(tmp_path, "ct3")
     script = [
