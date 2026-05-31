@@ -33,6 +33,7 @@ document.addEventListener('alpine:init', () => {
     _ephemeralTimers: {},    // id -> timeout de disparition (TTL)
     _pinHandlers: {},        // id -> handler click d'épingle (clic = garder)
     _spawning: {},           // file_path -> true pendant un spawn (anti double-spawn en rafale)
+    _inFlightSpawns: 0,      // spawns en cours (pas encore dans le DOM) -> comptés par le plafond
     _spawnTtlMs: 600000,     // 10 min (F3b : configurable via les réglages du chat)
     _spawnCap: 20,           // max d'auto-spawnés vivants (F3b : configurable)
 
@@ -600,7 +601,8 @@ document.addEventListener('alpine:init', () => {
         return;
       }
       this._spawning[path] = true;
-      this._enforceSpawnCap();                              // ferme le plus ancien éphémère si plafond atteint
+      this._inFlightSpawns += 1;                            // compte le spawn EN VOL (pas encore dans le DOM) pour le plafond
+      this._enforceSpawnCap();
       const pos = this.editorSpawnPos();
       try {
         let node;
@@ -619,18 +621,24 @@ document.addEventListener('alpine:init', () => {
           });
           if (r2.ok) { node = await r2.json(); opened = true; }
         } catch (e) { /* échec -> annulation */ }
-        if (!opened) { try { await fetch('/api/canvas/nodes/' + node.id, { method: 'DELETE' }); } catch (e) {} return; }
+        if (!opened) {
+          try { await fetch('/api/canvas/nodes/' + node.id, { method: 'DELETE' }); } catch (e) {} // rollback : pas de node fantôme
+          const cId = this.kindId('chat'), exId = this.kindId('fileexplorer'); // échec d'ouverture -> repli comète explorateur (feedback comme F1/F2)
+          if (cId && exId) this.pulseTo(cId, exId, 'soft');
+          return;
+        }
         const world = this.$root.querySelector('.world');
         if (!world) return;
         const wrap = this.renderNode(node);               // pose la classe 'ephemeral' + TTL + clic=épingle
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
         this.drawCables();
+        this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
         const chatId = this.kindId('chat');
         if (chatId) await this.pulseTo(chatId, node.id, 'strong'); // la comète VOYAGE chat -> nouvel éditeur
-        wrap.classList.remove('spawning');                 // l'éditeur APPARAÎT (fade-in)
-        this.glow(node.id, 'strong', 1500);
+        if (wrap.isConnected) { wrap.classList.remove('spawning'); this.glow(node.id, 'strong', 1500); } // APPARAÎT (sauf si recyclé entre-temps)
       } finally {
+        this._inFlightSpawns -= 1;
         delete this._spawning[path];
         this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
@@ -640,9 +648,11 @@ document.addEventListener('alpine:init', () => {
     _markEphemeral(wrap, node) {
       wrap.classList.add('ephemeral');
       this._armTtl(node.id, node.expires_at_ms);
+      // clic SUR le node = épingle. Phase BUBBLE (pas capture) : les boutons Enregistrer/Fermer de
+      // l'éditeur font stopPropagation -> ils n'atteignent pas le wrap (pas d'épingle parasite).
       const pin = () => this._pinNode(node.id);
       this._pinHandlers[node.id] = pin;
-      wrap.addEventListener('click', pin, true);            // capture : passe avant les clics internes de l'éditeur
+      wrap.addEventListener('click', pin);
     },
 
     _armTtl(id, expiresAtMs) {
@@ -656,30 +666,41 @@ document.addEventListener('alpine:init', () => {
     },
     _rearmTtl(id) { this._armTtl(id, Date.now() + this._spawnTtlMs); }, // lecture répétée (TTL front, non re-persisté v1)
 
-    async _expireEphemeral(id) {
+    // Oublie tout l'état éphémère d'un node (timer + handler d'épingle) -> pas de fuite à l'expiration,
+    // au recyclage, à l'épingle ou à la fermeture manuelle.
+    _forgetEphemeral(id) {
       this._clearTtl(id);
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (wrap && this._pinHandlers[id]) wrap.removeEventListener('click', this._pinHandlers[id]);
+      delete this._pinHandlers[id];
+    },
+
+    async _expireEphemeral(id) {
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      this._forgetEphemeral(id);
       if (!wrap || !wrap.classList.contains('ephemeral')) return; // épinglé entre-temps -> ne pas supprimer
       try { await fetch('/api/canvas/nodes/' + id, { method: 'DELETE' }); } catch (e) {}
       const w = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
       if (w) { w.remove(); this.drawCables(); }
     },
 
-    // Plafond : si trop d'auto-spawnés vivants, ferme le(s) plus ancien(s) (ordre DOM = ordre de spawn).
+    // Plafond : si trop d'auto-spawnés VIVANTS (DOM) + EN VOL, ferme le(s) plus ancien(s) (ordre DOM).
     _enforceSpawnCap() {
       const eph = [...this.$root.querySelectorAll('.node-wrap.ephemeral')];
-      const over = eph.length - this._spawnCap + 1;
+      const over = eph.length + this._inFlightSpawns - this._spawnCap; // inclut les spawns en vol (pas encore dans le DOM)
       for (let i = 0; i < over && i < eph.length; i++) this._expireEphemeral(eph[i].dataset.id);
     },
 
-    // Épingle : l'aperçu devient permanent (plus de TTL, plus de style éphémère).
+    // Épingle : l'aperçu devient permanent. On AWAIT le serveur d'abord ; on ne mute l'UI qu'au succès
+    // (sinon, sur échec réseau, le node paraîtrait épinglé mais serait purgé au reload).
     async _pinNode(id) {
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
       if (!wrap || !wrap.classList.contains('ephemeral')) return;
-      this._clearTtl(id);
+      let ok = false;
+      try { ok = (await fetch('/api/canvas/nodes/' + id + '/pin', { method: 'POST' })).ok; } catch (e) { ok = false; }
+      if (!ok) { this.glow(id, 'error', 1500); return; } // échec : on garde l'aperçu (TTL/handler intacts) + flash
+      this._forgetEphemeral(id);
       wrap.classList.remove('ephemeral');
-      if (this._pinHandlers[id]) { wrap.removeEventListener('click', this._pinHandlers[id], true); delete this._pinHandlers[id]; }
-      try { await fetch('/api/canvas/nodes/' + id + '/pin', { method: 'POST' }); } catch (e) {}
     },
     // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
     // Vitesse CONSTANTE (durée ∝ longueur, mouvement linéaire) : un câble long n'accélère pas.
@@ -979,6 +1000,7 @@ document.addEventListener('alpine:init', () => {
       const wrap = state.nodeId
         && this.$root.querySelector('.node-wrap[data-id="' + state.nodeId + '"]');
       this.clearGlow(state.nodeId);
+      if (state.nodeId) this._forgetEphemeral(state.nodeId); // fermeture manuelle d'un éphémère : purge timer/handler
       if (wrap) wrap.remove();
       if (this.selectedId === state.nodeId) { this.hideToolbar(); this.selectedId = null; }
       this.drawCables(); // le câble disparaît avec le node source retiré

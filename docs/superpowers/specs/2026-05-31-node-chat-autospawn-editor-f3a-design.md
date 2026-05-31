@@ -83,7 +83,7 @@ tool_result(Read/Grep, fichier X non ouvert) [F1+F2]
 
 ## 7. Tests
 
-- **pytest** (`tests/unit/test_canvas_routes.py` ou équivalent) : `create_node` avec `ephemeral=true`
+- **pytest** (`tests/unit/test_app.py`, section « brique F3a ») : `create_node` avec `ephemeral=true`
   + `expires_at_ms` → node créé avec ces champs ; `POST .../pin` → `ephemeral=False`, `expires_at_ms=None` ;
   `GET /api/canvas` purge un node éphémère expiré (`expires_at_ms` passé) et garde un non-expiré ;
   rétro-compat (un `canvas.json` sans ces champs charge avec les défauts). Modèle `Node` : champs présents.

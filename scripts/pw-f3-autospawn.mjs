@@ -53,11 +53,9 @@ try {
   out.afterReload = await editorsFor('cli.py');
   out.ephAfterReload = await ephFor('cli.py');
 
-  // 4. ÉPINGLE au clic
-  await p.locator('.node-wrap.ephemeral[data-kind="fileeditor"]').filter({ has: p.locator('xpath=.') }).first().click({ position: { x: 5, y: 5 } }).catch(async () => {
-    await p.evaluate(() => { const w = [...document.querySelectorAll('.node-wrap.ephemeral[data-kind="fileeditor"]')].find((x) => (x.dataset.file || '').includes('cli.py')); if (w) w.click(); });
-  });
-  await p.waitForTimeout(1200);
+  // 4. ÉPINGLE au clic (clic programmatique sur le wrap -> bubble vers le listener d'épingle)
+  await p.evaluate(() => { const w = [...document.querySelectorAll('.node-wrap.ephemeral[data-kind="fileeditor"]')].find((x) => (x.dataset.file || '').includes('cli.py')); if (w) w.click(); });
+  await p.waitForTimeout(1500);
   out.ephAfterPin = await ephFor('cli.py');
   out.stillThereAfterPin = await editorsFor('cli.py');
   await p.screenshot({ path: join(OUT, 'f3-2-pinned.png') });
