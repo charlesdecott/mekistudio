@@ -508,7 +508,9 @@ document.addEventListener('alpine:init', () => {
     // cible au niveau `arrivalLevel`. CONCURRENTE : plusieurs comètes peuvent voler en même temps
     // (chacune ses propres éléments SVG) ; garde-fou _activePulses pour éviter l'emballement sur une
     // rafale d'outils parallèles. Les segments d'UNE comète restent séquentiels (elle suit son chemin).
-    async pulseTo(fromId, toId, arrivalLevel) {
+    // `drawChildId` (option, F3a) : le segment dont le childId vaut drawChildId voit son câble TRACÉ
+    // progressivement par la comète (au lieu d'être déjà visible) -> « la comète construit le câble ».
+    async pulseTo(fromId, toId, arrivalLevel, drawChildId) {
       if (!fromId || !toId || fromId === toId) return;
       if (this._activePulses >= 24) return; // anti-emballement (ex. 100 lectures parallèles)
       const boxes = this.nodeBoxes();
@@ -519,7 +521,7 @@ document.addEventListener('alpine:init', () => {
       this._activePulses += 1;
       try {
         for (const seg of path) {
-          await this.animateComet(seg);
+          await this.animateComet(seg, seg.childId === drawChildId);
           const arrived = seg.dir === 'up' ? seg.parentId : seg.childId;
           if (arrived !== toId) this.glow(arrived, 'soft', 600);
         }
@@ -634,8 +636,14 @@ document.addEventListener('alpine:init', () => {
         world.appendChild(wrap);
         this.drawCables();
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
+        // cache le câble du nouvel éditeur : la comète va le TRACER pixel par pixel en arrivant.
+        const svg = this.ensureCablesLayer();
+        const ng = svg && svg.querySelector('g[data-edge="' + node.id + '"]');
+        const ncore = ng && ng.querySelector('.cable-core');
+        if (ncore) { const L = ncore.getTotalLength(); ng.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = '0 ' + (L + 1); }); }
         const chatId = this.kindId('chat');
-        if (chatId) await this.pulseTo(chatId, node.id, 'strong'); // la comète VOYAGE chat -> nouvel éditeur
+        if (chatId) await this.pulseTo(chatId, node.id, 'strong', node.id); // la comète CONSTRUIT le câble (dernier segment)
+        if (ng) ng.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = ''; pa.style.strokeDashoffset = ''; }); // sécurité : câble complet
         if (wrap.isConnected) { wrap.classList.remove('spawning'); this.glow(node.id, 'strong', 1500); } // APPARAÎT (sauf si recyclé entre-temps)
       } finally {
         this._inFlightSpawns -= 1;
@@ -704,13 +712,19 @@ document.addEventListener('alpine:init', () => {
     },
     // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
     // Vitesse CONSTANTE (durée ∝ longueur, mouvement linéaire) : un câble long n'accélère pas.
-    animateComet(seg) {
+    // `draw` (F3a) : le câble est TRACÉ au fur et à mesure derrière la comète (stroke-dasharray) au
+    // lieu d'être déjà visible -> effet « la comète construit le câble, pixel par pixel ».
+    animateComet(seg, draw) {
       return new Promise((resolve) => {
         const svg = this.ensureCablesLayer();
         const g = svg && svg.querySelector('g[data-edge="' + seg.childId + '"]');
         const path = g && g.querySelector('.cable-core');
         if (!path) return resolve();
         const len = path.getTotalLength();
+        const drawPaths = draw ? [...g.querySelectorAll('path')] : []; // core + halo à révéler
+        const revealTo = (a, b) => drawPaths.forEach((pa) => { pa.style.strokeDasharray = (b - a) + ' ' + (len + 1); pa.style.strokeDashoffset = String(-a); });
+        const clearDash = () => drawPaths.forEach((pa) => { pa.style.strokeDasharray = ''; pa.style.strokeDashoffset = ''; });
+        if (draw) revealTo(0, 0); // caché au départ (la comète va le révéler)
         const NS = 'http://www.w3.org/2000/svg';
         const dot = document.createElementNS(NS, 'circle');
         dot.setAttribute('class', 'comet'); dot.setAttribute('r', '9'); svg.appendChild(dot);
@@ -754,11 +768,12 @@ document.addEventListener('alpine:init', () => {
           const at = seg.dir === 'up' ? t * len : (1 - t) * len; // sens du flux
           const p = path.getPointAtLength(at);
           dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
+          if (draw) revealTo(seg.dir === 'up' ? 0 : at, seg.dir === 'up' ? at : len); // câble visible DERRIÈRE la comète
           hist.unshift({ x: p.x, y: p.y });
           if (hist.length > TRAIL * STRIDE + 1) hist.pop();
           place();
           if (t < 1) requestAnimationFrame(step);
-          else { resolve(); fadeOut(); } // arrivée : on enchaîne le segment + rémanence en fond
+          else { if (draw) clearDash(); resolve(); fadeOut(); } // arrivée : câble complet + on enchaîne + rémanence
         };
         requestAnimationFrame(step);
       });
@@ -1055,19 +1070,34 @@ document.addEventListener('alpine:init', () => {
       if (ex) exb = this.boxOf(ex);
       const exC = { x: exb.x + exb.w / 2, y: exb.y + exb.h / 2 };
       const size = { w: 520, h: 440 }; // EDITOR_SPAWN_SIZE — refléter file_editor.py
-      const all = [], cableObs = []; // all = anti-chevauchement ; cableObs = test de câble (SANS l'explorateur, destination)
+      const all = [], cableObs = [], occupied = []; // all = anti-chevauchement ; cableObs = test câble ; occupied = angles pris
       this.$root.querySelectorAll('.node-wrap').forEach((w) => {
         const box = this.boxOf(w); all.push(box);
-        if (w.dataset.kind !== 'fileexplorer') cableObs.push(box);
+        if (w.dataset.kind === 'fileexplorer') return;
+        cableObs.push(box);
+        occupied.push(Math.atan2((box.y + box.h / 2) - exC.y, (box.x + box.w / 2) - exC.x));
       });
-      this._pendingSpots.forEach((s) => { all.push(s); cableObs.push(s); });
-      const minR = Math.max(exb.w, exb.h) / 2 + 420; // bien plus loin qu'avant (~40px du bord)
+      this._pendingSpots.forEach((s) => { all.push(s); cableObs.push(s); occupied.push(Math.atan2((s.y + s.h / 2) - exC.y, (s.x + s.w / 2) - exC.x)); });
+      // direction = milieu du plus grand SECTEUR ANGULAIRE LIBRE autour de l'explorateur : le « rayon »
+      // (câble) du nouvel éditeur ne croise alors aucun autre node -> pas de câble sous une node.
+      let baseAng = Math.random() * Math.PI * 2, gap = Math.PI * 2;
+      if (occupied.length) {
+        occupied.sort((a, b) => a - b);
+        gap = -1;
+        for (let i = 0; i < occupied.length; i++) {
+          const a0 = occupied[i];
+          const a1 = i + 1 < occupied.length ? occupied[i + 1] : occupied[0] + Math.PI * 2;
+          if (a1 - a0 > gap) { gap = a1 - a0; baseAng = a0 + (a1 - a0) / 2; }
+        }
+      }
+      const minR = Math.max(exb.w, exb.h) / 2 + 360; // plus loin qu'avant (~40px du bord), pas trop (câbles courts)
       const at = (x, y) => ({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h });
       const center = (s) => ({ x: s.x + size.w / 2, y: s.y + size.h / 2 });
       let fallback = null;
-      for (let i = 0; i < 48; i++) {
-        const ang = Math.random() * Math.PI * 2;
-        const dist = minR + Math.random() * 500;
+      for (let i = 0; i < 40; i++) {
+        // anneau resserré (distances proches) + secteur libre -> rayons quasi radiaux qui ne se croisent pas
+        const ang = baseAng + (Math.random() - 0.5) * Math.min(gap * 0.55, 0.6); // jitter dans le secteur (aléatoire)
+        const dist = minR + Math.random() * 230;
         const cand = at(exC.x + Math.cos(ang) * dist - size.w / 2, exC.y + Math.sin(ang) * dist - size.h / 2);
         if (!C.isFree(cand, all, C.GAP)) continue;        // ne pas chevaucher un node existant
         if (!fallback) fallback = cand;                    // 1er spot libre -> repli si aucun "dégagé"
