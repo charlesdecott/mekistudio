@@ -29,6 +29,12 @@ document.addEventListener('alpine:init', () => {
     _activePulses: 0,        // nb de comètes en vol (concurrentes) ; garde-fou anti-emballement
     _glowTimers: {},         // id -> timeout d'extinction du glow
     _dismissOff: {},         // id -> handler click d'acquittement (glow persistant) ; 1 seul par node
+    // Brique F3a : auto-spawn d'éditeurs éphémères (aperçus des fichiers lus par Claude).
+    _ephemeralTimers: {},    // id -> timeout de disparition (TTL)
+    _pinHandlers: {},        // id -> handler click d'épingle (clic = garder)
+    _spawning: {},           // file_path -> true pendant un spawn (anti double-spawn en rafale)
+    _spawnTtlMs: 600000,     // 10 min (F3b : configurable via les réglages du chat)
+    _spawnCap: 20,           // max d'auto-spawnés vivants (F3b : configurable)
 
     async init() {
       let state = {};
@@ -90,6 +96,7 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.source = node.source_id || ''; // graphe de câbles lu depuis le DOM
       // file_path n'est PAS à root.file_path : il est imbriqué dans l'arbre (composant type 'editor').
       if (node.kind === 'fileeditor') wrap.dataset.file = this.fileOfComponent(node.root);
+      if (node.ephemeral) this._markEphemeral(wrap, node); // aperçu auto-spawné (F3a) : style + TTL + clic=épingle
       this.applyBox(wrap, node);
       wrap.appendChild(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
@@ -564,7 +571,13 @@ document.addEventListener('alpine:init', () => {
         const toId = intent.target.by === 'file'
           ? this.editorIdForFile(intent.target.value)
           : this.kindId(intent.target.value);
-        if (!toId) { if (intent.fallback) this.applyIntent(intent.fallback); return; } // pas de cible -> repli (comète -> explorateur)
+        if (!toId) {
+          // F3a : fichier lu mais AUCUN éditeur ouvert -> on SPAWN un éditeur éphémère (la comète
+          // matérialise le fichier). Sinon (cible par kind introuvable) -> repli éventuel.
+          if (intent.target.by === 'file') { this.spawnEphemeralEditor(intent.target.value); return; }
+          if (intent.fallback) this.applyIntent(intent.fallback);
+          return;
+        }
         if (chatId) this.pulseTo(chatId, toId, intent.level || 'strong'); // comète qui VOYAGE (comme le mode debug ⚡)
         return;
       }
@@ -573,6 +586,100 @@ document.addEventListener('alpine:init', () => {
       // dismissable (Stop / Notification) -> PERSISTANT (ms=0) jusqu'au clic ; sinon auto-fade.
       if (intent.dismissable) { this.glowDismissable(id, intent.level, 0); return; }
       this.glow(id, intent.level, intent.level === 'soft' ? 600 : 1500);
+    },
+
+    // --- F3a : auto-spawn d'un éditeur éphémère pour un fichier lu mais non ouvert ---
+    async spawnEphemeralEditor(path) {
+      if (!path || this._spawning[path]) return;            // rafale du même fichier -> 1 seul spawn
+      const existing = this.editorIdForFile(path);
+      if (existing) {                                       // dedup : déjà ouvert -> comète + ré-arme TTL
+        const chatId = this.kindId('chat');
+        if (chatId) this.pulseTo(chatId, existing, 'strong');
+        const w = this.$root.querySelector('.node-wrap[data-id="' + existing + '"]');
+        if (w && w.classList.contains('ephemeral')) this._rearmTtl(existing); // ré-arme seulement si encore éphémère
+        return;
+      }
+      this._spawning[path] = true;
+      this._enforceSpawnCap();                              // ferme le plus ancien éphémère si plafond atteint
+      const pos = this.editorSpawnPos();
+      try {
+        let node;
+        try {
+          const r = await fetch('/api/canvas/nodes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, ephemeral: true, expires_at_ms: Date.now() + this._spawnTtlMs }),
+          });
+          if (!r.ok) return;
+          node = await r.json();
+        } catch (e) { return; }
+        let opened = false;
+        try {
+          const r2 = await fetch('/api/canvas/nodes/' + node.id + '/open', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+          });
+          if (r2.ok) { node = await r2.json(); opened = true; }
+        } catch (e) { /* échec -> annulation */ }
+        if (!opened) { try { await fetch('/api/canvas/nodes/' + node.id, { method: 'DELETE' }); } catch (e) {} return; }
+        const world = this.$root.querySelector('.world');
+        if (!world) return;
+        const wrap = this.renderNode(node);               // pose la classe 'ephemeral' + TTL + clic=épingle
+        wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
+        world.appendChild(wrap);
+        this.drawCables();
+        const chatId = this.kindId('chat');
+        if (chatId) await this.pulseTo(chatId, node.id, 'strong'); // la comète VOYAGE chat -> nouvel éditeur
+        wrap.classList.remove('spawning');                 // l'éditeur APPARAÎT (fade-in)
+        this.glow(node.id, 'strong', 1500);
+      } finally {
+        delete this._spawning[path];
+        this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
+      }
+    },
+
+    // Marque un node éditeur comme éphémère : style, timer TTL, clic = épingle (garder).
+    _markEphemeral(wrap, node) {
+      wrap.classList.add('ephemeral');
+      this._armTtl(node.id, node.expires_at_ms);
+      const pin = () => this._pinNode(node.id);
+      this._pinHandlers[node.id] = pin;
+      wrap.addEventListener('click', pin, true);            // capture : passe avant les clics internes de l'éditeur
+    },
+
+    _armTtl(id, expiresAtMs) {
+      this._clearTtl(id);
+      if (!expiresAtMs) return;
+      const ms = Math.max(0, expiresAtMs - Date.now());
+      this._ephemeralTimers[id] = setTimeout(() => this._expireEphemeral(id), ms);
+    },
+    _clearTtl(id) {
+      if (this._ephemeralTimers[id]) { clearTimeout(this._ephemeralTimers[id]); delete this._ephemeralTimers[id]; }
+    },
+    _rearmTtl(id) { this._armTtl(id, Date.now() + this._spawnTtlMs); }, // lecture répétée (TTL front, non re-persisté v1)
+
+    async _expireEphemeral(id) {
+      this._clearTtl(id);
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (!wrap || !wrap.classList.contains('ephemeral')) return; // épinglé entre-temps -> ne pas supprimer
+      try { await fetch('/api/canvas/nodes/' + id, { method: 'DELETE' }); } catch (e) {}
+      const w = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (w) { w.remove(); this.drawCables(); }
+    },
+
+    // Plafond : si trop d'auto-spawnés vivants, ferme le(s) plus ancien(s) (ordre DOM = ordre de spawn).
+    _enforceSpawnCap() {
+      const eph = [...this.$root.querySelectorAll('.node-wrap.ephemeral')];
+      const over = eph.length - this._spawnCap + 1;
+      for (let i = 0; i < over && i < eph.length; i++) this._expireEphemeral(eph[i].dataset.id);
+    },
+
+    // Épingle : l'aperçu devient permanent (plus de TTL, plus de style éphémère).
+    async _pinNode(id) {
+      const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+      if (!wrap || !wrap.classList.contains('ephemeral')) return;
+      this._clearTtl(id);
+      wrap.classList.remove('ephemeral');
+      if (this._pinHandlers[id]) { wrap.removeEventListener('click', this._pinHandlers[id], true); delete this._pinHandlers[id]; }
+      try { await fetch('/api/canvas/nodes/' + id + '/pin', { method: 'POST' }); } catch (e) {}
     },
     // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
     // Vitesse CONSTANTE (durée ∝ longueur, mouvement linéaire) : un câble long n'accélère pas.

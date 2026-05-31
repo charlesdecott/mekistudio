@@ -247,6 +247,26 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
   transition: box-shadow 0.2s ease;
 }
 
+/* F3a : éditeur auto-spawné (aperçu éphémère). Outline (coexiste avec le box-shadow du glow) + fade-in. */
+.node-wrap.ephemeral {
+  opacity: 0.9;
+  outline: 2px dashed rgba(59, 165, 93, 0.75);
+  outline-offset: 3px;
+  border-radius: 12px;
+  transition: opacity 0.45s ease;
+}
+.node-wrap.ephemeral::after {
+  content: '✨ aperçu · clic = garder';
+  position: absolute;
+  top: -17px;
+  left: 0;
+  font-size: 10px;
+  color: #3ba55d;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.node-wrap.spawning { opacity: 0 !important; } /* invisible jusqu'à l'arrivée de la comète */
+
 /* --- node chat (Discord-fidèle, layout A) --- */
 .cmp-chat-host { display: flex; min-height: 0; min-width: 0; }
 .node-wrap.sized .cmp-chat-host { flex: 1 1 auto; min-height: 0; }
