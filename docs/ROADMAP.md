@@ -83,9 +83,14 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     (`chat-impulses.js`, `node --test`) ; API hooks épinglée par smoke. Validé Playwright (comète qui
     voyage, glow de l'éditeur, persistance, concurrence, 0 erreur console). Spec/plan :
     `docs/superpowers/{specs,plans}/2026-05-30-node-chat-hooks-impulsions*`.
-  - Reste sur le chat : **F3 — auto-spawn d'un éditeur** quand Claude lit un fichier **non ouvert**
-    (la comète trace le câble + node éphémère TTL/épingle, modes configurables ; spec 2 de la
-    brique F) · **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
+  - **Auto-spawn d'éditeur (F3a)** (livré, 2026-05-31) : lire un fichier **non ouvert** → la comète
+    matérialise un **éditeur du fichier** (près de l'explorateur, fade-in à l'arrivée). **Éphémère**
+    par défaut : persisté (`Node.ephemeral`+`expires_at_ms`), **auto-supprimé** au TTL (10 min, purge
+    au chargement serveur), **survit à un reload**, **clic = épingle** → permanent (`POST .../pin`),
+    **dedup** par fichier, **plafond 20**. Validé Playwright (spawn, dedup, survie reload, épingle,
+    TTL→disparition, 0 erreur console). Spec : `docs/superpowers/specs/2026-05-31-node-chat-autospawn-editor-f3a*`.
+  - Reste sur le chat : **F3b — réglages** (modale du chat `configurable` : modes éphémère / plafond-FIFO
+    / illimité + TTL/plafond éditables) · **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
     `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.
     Ailleurs : palette d'ajout, multi-onglets.
