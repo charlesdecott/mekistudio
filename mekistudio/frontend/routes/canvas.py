@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -68,12 +69,15 @@ class NodeOpen(BaseModel):
 
 class NodeCreate(BaseModel):
     """Crée un node d'un kind donné à une position. `source_id` : override optionnel
-    du parent logique (sinon dérivé côté serveur)."""
+    du parent logique (sinon dérivé côté serveur). `ephemeral`/`expires_at_ms` : éditeur
+    auto-spawné (brique F3, aperçu auto-supprimé au TTL)."""
 
     kind: str
     x: float = 0.0
     y: float = 0.0
     source_id: str | None = None
+    ephemeral: bool = False
+    expires_at_ms: int | None = None
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -113,7 +117,16 @@ async def get_canvas(request: Request) -> dict:
     root = request.app.state.repo_root
     # Assure le seed du canvas (kernelNode) même si /api/canvas est la 1re requête.
     bootstrap.ensure_meki_dir(root)
-    return bootstrap.load_canvas(root).model_dump(mode="json")
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        # Brique F3 : purge les éditeurs éphémères dont le TTL est dépassé (évite la résurrection
+        # d'aperçus expirés après un redémarrage serveur / reload). Sauve seulement si ça change.
+        now = int(time.time() * 1000)
+        alive = [n for n in state.nodes if not (n.ephemeral and n.expires_at_ms is not None and n.expires_at_ms < now)]
+        if len(alive) != len(state.nodes):
+            state.nodes = alive
+            bootstrap.save_canvas(root, state)
+        return state.model_dump(mode="json")
 
 
 @router.post("/api/canvas/viewport")
@@ -183,7 +196,26 @@ async def create_node(request: Request, body: NodeCreate) -> dict:
             node.source_id = body.source_id
         else:
             node.source_id = canonical_parent_id(state, body.kind)
+        node.ephemeral = body.ephemeral
+        node.expires_at_ms = body.expires_at_ms
         state.nodes.append(node)
+        bootstrap.save_canvas(root, state)
+        return node.model_dump(mode="json")
+
+
+@router.post("/api/canvas/nodes/{node_id}/pin")
+async def pin_node(request: Request, node_id: str) -> dict:
+    """Épingle un éditeur auto-spawné (brique F3) -> permanent : ephemeral=False,
+    expires_at_ms=None (plus de purge au TTL). Persiste."""
+    root = request.app.state.repo_root
+    bootstrap.ensure_meki_dir(root)
+    async with _canvas_lock:
+        state = bootstrap.load_canvas(root)
+        node = next((n for n in state.nodes if n.id == node_id), None)
+        if node is None:
+            raise HTTPException(status_code=404, detail="node introuvable")
+        node.ephemeral = False
+        node.expires_at_ms = None
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
 

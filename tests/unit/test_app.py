@@ -315,3 +315,58 @@ def test_open_preserves_source_id(tmp_path):
     eid = client.post("/api/canvas/nodes", json={"kind": "fileeditor", "x": 1, "y": 1}).json()["id"]
     opened = client.post(f"/api/canvas/nodes/{eid}/open", json={"path": "f.txt"}).json()
     assert opened["source_id"] == ids["fileexplorer"]  # /open n'efface pas le lien
+
+
+# --- brique F3a : auto-spawn éphémère ---
+
+def test_create_ephemeral_node_with_expiry(tmp_path):
+    node = _client(tmp_path).post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 700, "y": 0, "ephemeral": True, "expires_at_ms": 9_999_999_999_999},
+    ).json()
+    assert node["ephemeral"] is True and node["expires_at_ms"] == 9_999_999_999_999
+
+
+def test_create_node_defaults_not_ephemeral(tmp_path):
+    node = _client(tmp_path).post("/api/canvas/nodes", json={"kind": "fileeditor", "x": 1, "y": 1}).json()
+    assert node["ephemeral"] is False and node["expires_at_ms"] is None
+
+
+def test_pin_makes_node_permanent_and_persists(tmp_path):
+    client = _client(tmp_path)
+    eid = client.post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 1, "y": 1, "ephemeral": True, "expires_at_ms": 123},
+    ).json()["id"]
+    pinned = client.post(f"/api/canvas/nodes/{eid}/pin")
+    assert pinned.status_code == 200
+    assert pinned.json()["ephemeral"] is False and pinned.json()["expires_at_ms"] is None
+    nodes = client.get("/api/canvas").json()["nodes"]
+    assert any(n["id"] == eid and n["ephemeral"] is False for n in nodes)
+
+
+def test_pin_unknown_node_404(tmp_path):
+    assert _client(tmp_path).post("/api/canvas/nodes/nope/pin").status_code == 404
+
+
+def test_get_canvas_purges_expired_ephemeral(tmp_path):
+    client = _client(tmp_path)
+    expired = client.post(
+        "/api/canvas/nodes", json={"kind": "fileeditor", "x": 1, "y": 1, "ephemeral": True, "expires_at_ms": 1}
+    ).json()["id"]
+    alive = client.post(
+        "/api/canvas/nodes", json={"kind": "fileeditor", "x": 2, "y": 2, "ephemeral": True, "expires_at_ms": 9_999_999_999_999}
+    ).json()["id"]
+    ids = {n["id"] for n in client.get("/api/canvas").json()["nodes"]}
+    assert expired not in ids  # éphémère expiré -> purgé au chargement
+    assert alive in ids        # éphémère vivant -> gardé
+
+
+def test_get_canvas_keeps_permanent_and_ephemeral_without_expiry(tmp_path):
+    client = _client(tmp_path)
+    perm = _new_editor(client)  # permanent (non éphémère)
+    eph_noexp = client.post(
+        "/api/canvas/nodes", json={"kind": "fileeditor", "x": 3, "y": 3, "ephemeral": True}
+    ).json()["id"]  # éphémère SANS date d'expiration -> pas purgé
+    ids = {n["id"] for n in client.get("/api/canvas").json()["nodes"]}
+    assert perm in ids and eph_noexp in ids

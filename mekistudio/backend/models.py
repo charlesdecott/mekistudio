@@ -39,6 +39,10 @@ class Node(BaseModel):
     configurable: bool = False  # affiche un engrenage (modale de réglages)
     max_w: float | None = None
     max_h: float | None = None
+    # Brique F3 : éditeur auto-spawné par une lecture de Claude. `ephemeral` = aperçu (auto-supprimé
+    # au TTL, épinglable) ; `expires_at_ms` = échéance (purge au chargement si dépassée). None = permanent.
+    ephemeral: bool = False
+    expires_at_ms: int | None = None
     root: NodeComponent
 
 
