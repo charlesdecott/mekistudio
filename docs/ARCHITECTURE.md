@@ -74,6 +74,11 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   (`window.MekiCollision`, testée `node --test`) : `intersects`/`isFree`, `partVector`
   (écarte un voisin, 2 côtés), `pushVector` (resize), `clampAgainst` (mur), `findFreeSpot`
   (trou libre en spirale bornée).
+- **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
+  `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
+  `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
+  'kind', value}, level, dismissable?, fallback?}`. `canvas.js` la résout et anime. Les hooks Claude
+  déclenchent ainsi les impulsions (brique F1+F2).
 - **`static/js/canvas.js`** — composant Alpine `canvas()` : pan/zoom, outils
   `select`/`move`/`resize`, rendu **récursif** des nodes (`renderComponent`), arbre fichiers
   **lazy**, nodes éditeur multi-instances, modale réglages, sélection + z-index.
@@ -81,7 +86,11 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   re-route à chaque move/resize/spawn/close/init. **Collision** : modèle home/`translate`
   transitoire (`boxOf`/`setTranslate`), `_pushNeighbors`/`_pushOnResize`, reloge final au
   lâcher (là où poussé), `reconcileOverlaps` au boot, spawn via `findFreeSpot`.
-  **Impulsions** : mini-toolbar ⚡ (`showToolbar`), `firePulse`/`animateComet`/`glow`.
+  **Impulsions** : mini-toolbar ⚡ (`showToolbar`), `firePulse`/`pulseTo`/`animateComet`/`glow`
+  (comètes **concurrentes** via `_activePulses`). **Hooks → impulsions** (F1+F2) : écoute
+  `meki:impulse` (dispatché par `chat-view.js`), `applyIntent` résout la cible (éditeur par
+  `data-file` via `fileOfComponent`, sinon explorateur/chat par `data-kind`) et anime comète/glow ;
+  glow **persistant** (Stop/Notification) éteint au clic (`glowDismissable`).
 - **`static/js/editor.js`** — module ESM **CodeMirror 6** (depuis esm.sh) : expose
   `window.MekiEditor.mount()` ; coloration par extension, guides d'indentation,
   word-wrap, thème oneDark, Ctrl+S ; fallback si le CDN ne charge pas.

@@ -47,10 +47,10 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
   - **Câbles/wires** (livré) : dérivés de `Node.source_id` (arbre kernel→explorer→éditeurs),
     tracé **subway 45° adaptatif** + ruban néon, **contournement des nodes** (45° + changement
     de face) et **anti-superposition** des câbles, re-route auto.
-  - **Impulsions ⚡** (livré, debug) : mini-toolbar ⚡ sous le node sélectionné → **comète** le
+  - **Impulsions ⚡** (livré) : mini-toolbar ⚡ sous le node sélectionné → **comète** le
     long du chemin (`pathBetween` sur l'arbre `source_id`), nodes traversés en glow doux, cible
-    en flash fort. Simulateur en attendant le node chat (alors `AgentEnd` déclenchera la vraie
-    impulsion chat → éditeur).
+    en flash fort. **Désormais déclenchées aussi par les hooks du node chat** (F1+F2, voir plus bas) —
+    le ⚡ reste pour le debug.
   - **Anti-chevauchement des nodes** (livré) : invariant zéro-recouvrement, collision douce
     (voisin écarté/relogé), kernel = mur, spawn dans un trou libre, réconciliation au boot.
   - **Node chat × Claude Agent SDK — squelette vertical** (livré, 2026-05-30) : node chat
@@ -72,9 +72,22 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     orphelins** à l'interrupt. Validé Playwright (Read CLAUDE.md → carte, 0 erreur console).
     Spec/plan/revue : `docs/superpowers/{specs,plans}/2026-05-30-node-chat-tool-cards*` ;
     3 modes de carte (A/B/C) dans `docs/tool-card-styles.md`.
-  - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
-    `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **hooks →
-    impulsions** · **QCM / `ask_user`** · **panneau hooks** · modes de carte A/B en réglages.
+  - **Hooks → impulsions (F1+F2)** (livré, 2026-05-31) : les hooks Claude Code (capturés via des
+    hooks **émetteurs** `HookMatcher`, à côté du guard) et la **fin de tour** déclenchent les
+    impulsions du canvas. **Comète** chat → éditeur du fichier lu (s'il est ouvert), sinon comète
+    vers l'explorateur ; **glow** explorateur (Glob/LS) ; **glow fort persistant** sur le chat en
+    fin de tour (Stop), éteint au **clic** ; **flash rouge** sur refus hors-repo / erreur outil.
+    Comètes **concurrentes** (plusieurs en vol). **Volet « hooks »** repliable (debug) dans le node
+    chat. Events **transients** (`hook_fired`/`turn_end`/`attached`, non persistés) ; le marqueur
+    `attached` = fin de replay → **pas d'impulsion au reload**. Mapping **pur** testé
+    (`chat-impulses.js`, `node --test`) ; API hooks épinglée par smoke. Validé Playwright (comète qui
+    voyage, glow de l'éditeur, persistance, concurrence, 0 erreur console). Spec/plan :
+    `docs/superpowers/{specs,plans}/2026-05-30-node-chat-hooks-impulsions*`.
+  - Reste sur le chat : **F3 — auto-spawn d'un éditeur** quand Claude lit un fichier **non ouvert**
+    (la comète trace le câble + node éphémère TTL/épingle, modes configurables ; spec 2 de la
+    brique F) · **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
+    `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
+    `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.
     Ailleurs : palette d'ajout, multi-onglets.
 
 Specs/plans détaillés : [`docs/superpowers/`](superpowers/).
