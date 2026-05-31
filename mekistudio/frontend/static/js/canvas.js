@@ -28,6 +28,7 @@ document.addEventListener('alpine:init', () => {
     _toolbar: null,          // mini-toolbar ⚡ du node sélectionné
     _activePulses: 0,        // nb de comètes en vol (concurrentes) ; garde-fou anti-emballement
     _glowTimers: {},         // id -> timeout d'extinction du glow
+    _dismissOff: {},         // id -> handler click d'acquittement (glow persistant) ; 1 seul par node
 
     async init() {
       let state = {};
@@ -534,21 +535,23 @@ document.addEventListener('alpine:init', () => {
     },
 
     editorIdForFile(filePath) {
-      const norm = (p) => (p || '').replace(/\\/g, '/').replace(/^\.\//, '');
-      const want = norm(filePath);
-      if (!want) return null;
+      if (!filePath) return null;
+      // match robuste (relatif/absolu/./), via le matcher PUR teste de chat-impulses.
+      const m = window.MekiImpulses && window.MekiImpulses.fileMatch;
       const wraps = this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]');
-      for (const w of wraps) if (norm(w.dataset.file) === want) return w.dataset.id;
+      for (const w of wraps) if (w.dataset.file && m && m(w.dataset.file, filePath)) return w.dataset.id;
       return null;
     },
 
-    // Glow + clic sur le node = extinction (acquittement). Capture pour passer AVANT les
-    // stopPropagation internes du chat.
+    // Glow persistant + clic sur le node = extinction (acquittement). Capture pour passer AVANT les
+    // stopPropagation internes du chat. UN SEUL handler par node (glow() vient de purger le précédent),
+    // retiré par clearGlow -> pas d'accumulation de listeners sur les tours non acquittés.
     glowDismissable(id, level, ms) {
       this.glow(id, level, ms);
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
       if (!wrap) return;
-      const off = () => { this.clearGlow(id); wrap.removeEventListener('click', off, true); };
+      const off = () => { this.clearGlow(id); };
+      this._dismissOff[id] = off;
       wrap.addEventListener('click', off, true);
     },
 
@@ -637,6 +640,7 @@ document.addEventListener('alpine:init', () => {
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
       if (!wrap) return;
       if (this._glowTimers[id]) { clearTimeout(this._glowTimers[id]); delete this._glowTimers[id]; }
+      this._unbindDismiss(id, wrap); // un glow qui remplace un glow dismissable -> retire son listener
       wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif', 'glow-error');
       wrap.classList.add('glow-' + level);
       if (ms > 0) {
@@ -648,7 +652,10 @@ document.addEventListener('alpine:init', () => {
     clearGlow(id) {
       if (this._glowTimers[id]) { clearTimeout(this._glowTimers[id]); delete this._glowTimers[id]; }
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
-      if (wrap) wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif', 'glow-error');
+      if (wrap) { wrap.classList.remove('glow-soft', 'glow-strong', 'glow-notif', 'glow-error'); this._unbindDismiss(id, wrap); }
+    },
+    _unbindDismiss(id, wrap) {
+      if (this._dismissOff[id]) { wrap.removeEventListener('click', this._dismissOff[id], true); delete this._dismissOff[id]; }
     },
     async persistNode(node) {
       try {

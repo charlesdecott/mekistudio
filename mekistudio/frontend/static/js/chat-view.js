@@ -208,7 +208,8 @@
           type: 'tool_result',
           is_error: !!ev.is_error,
           name: t && t.name,
-          file_path: t && t.input && t.input.file_path,
+          // Grep/LS portent leur chemin dans `path` (pas `file_path`) — cf. backend guard.py.
+          file_path: t && t.input && (t.input.file_path || t.input.path),
         };
       }
       const intent = window.MekiImpulses && window.MekiImpulses.impulseFor(e);
