@@ -87,7 +87,8 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.resizable = node.resizable !== false;
       wrap.dataset.configurable = node.configurable === true;
       wrap.dataset.source = node.source_id || ''; // graphe de câbles lu depuis le DOM
-      if (node.kind === 'fileeditor') wrap.dataset.file = (node.root && node.root.file_path) || '';
+      // file_path n'est PAS à root.file_path : il est imbriqué dans l'arbre (composant type 'editor').
+      if (node.kind === 'fileeditor') wrap.dataset.file = this.fileOfComponent(node.root);
       this.applyBox(wrap, node);
       wrap.appendChild(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
@@ -521,6 +522,14 @@ document.addEventListener('alpine:init', () => {
       return w ? w.dataset.id : null;
     },
 
+    // Cherche récursivement le file_path du composant 'editor' dans l'arbre de composants du node.
+    fileOfComponent(comp) {
+      if (!comp) return '';
+      if (comp.type === 'editor' && comp.file_path) return comp.file_path;
+      if (comp.children) for (const c of comp.children) { const f = this.fileOfComponent(c); if (f) return f; }
+      return '';
+    },
+
     editorIdForFile(filePath) {
       const norm = (p) => (p || '').replace(/\\/g, '/').replace(/^\.\//, '');
       const want = norm(filePath);
@@ -545,17 +554,19 @@ document.addEventListener('alpine:init', () => {
       if (!intent) return;
       if (intent.kind === 'comet') {
         const chatId = this.kindId('chat');
-        const toId = this.editorIdForFile(intent.target.value);
-        if (chatId && toId) { this.pulseTo(chatId, toId, intent.level === 'strong' ? 'strong' : 'soft'); return; }
-        if (intent.fallback) this.applyIntent(intent.fallback);
+        // cible par 'file' (éditeur du fichier, si ouvert) OU par 'kind' (ex. explorateur).
+        const toId = intent.target.by === 'file'
+          ? this.editorIdForFile(intent.target.value)
+          : this.kindId(intent.target.value);
+        if (!toId) { if (intent.fallback) this.applyIntent(intent.fallback); return; } // pas de cible -> repli (comète -> explorateur)
+        if (chatId) this.pulseTo(chatId, toId, intent.level || 'strong'); // comète qui VOYAGE (comme le mode debug ⚡)
         return;
       }
       const id = intent.target.by === 'kind' ? this.kindId(intent.target.value) : intent.target.value;
       if (!id) return;
-      const ms = intent.level === 'notif' ? 0 : 1500; // soft=600 plus bas
-      const dur = intent.level === 'soft' ? 600 : ms;
-      if (intent.dismissable) this.glowDismissable(id, intent.level, dur);
-      else this.glow(id, intent.level, dur);
+      // dismissable (Stop / Notification) -> PERSISTANT (ms=0) jusqu'au clic ; sinon auto-fade.
+      if (intent.dismissable) { this.glowDismissable(id, intent.level, 0); return; }
+      this.glow(id, intent.level, intent.level === 'soft' ? 600 : 1500);
     },
     // Anime une comète le long du câble du segment (sens du flux). Promise résolue à l'arrivée.
     // Vitesse CONSTANTE (durée ∝ longueur, mouvement linéaire) : un câble long n'accélère pas.

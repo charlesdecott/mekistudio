@@ -6,7 +6,7 @@
   'use strict';
 
   const FILE_TOOLS = { Read: 1, Grep: 1 }; // portent un file_path -> comète vers le fichier
-  const LIST_TOOLS = { Glob: 1, LS: 1 };   // listing -> glow explorateur
+  const LIST_TOOLS = { Glob: 1, LS: 1 };   // listing -> comète vers l'explorateur
 
   function impulseFor(ev) {
     if (!ev) return null;
@@ -18,11 +18,13 @@
             kind: 'comet',
             target: { by: 'file', value: ev.file_path },
             level: 'strong',
-            fallback: { kind: 'glow', target: { by: 'kind', value: 'fileexplorer' }, level: 'soft' },
+            // pas d'éditeur ouvert pour ce fichier -> la comète VOYAGE quand même vers l'explorateur
+            // (et non un simple glow) : on veut voir l'impulsion se déplacer, comme le mode debug ⚡.
+            fallback: { kind: 'comet', target: { by: 'kind', value: 'fileexplorer' }, level: 'strong' },
           };
         }
         if (ev.name && LIST_TOOLS[ev.name]) {
-          return { kind: 'glow', target: { by: 'kind', value: 'fileexplorer' }, level: 'soft' };
+          return { kind: 'comet', target: { by: 'kind', value: 'fileexplorer' }, level: 'soft' };
         }
         return null;
       case 'turn_end':

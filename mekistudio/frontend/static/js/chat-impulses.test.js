@@ -2,12 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const MekiImpulses = require('./chat-impulses.js');
 
-test('tool_result Read réussi -> comète vers le fichier (fallback glow explorateur)', () => {
+test('tool_result Read réussi -> comète vers le fichier (fallback COMÈTE vers explorateur)', () => {
   const i = MekiImpulses.impulseFor({ type: 'tool_result', is_error: false, name: 'Read', file_path: 'a.py' });
   assert.equal(i.kind, 'comet');
   assert.deepEqual(i.target, { by: 'file', value: 'a.py' });
   assert.equal(i.level, 'strong');
-  assert.deepEqual(i.fallback, { kind: 'glow', target: { by: 'kind', value: 'fileexplorer' }, level: 'soft' });
+  // pas d'éditeur ouvert -> la comète VOYAGE quand même vers l'explorateur (pas un simple glow)
+  assert.deepEqual(i.fallback, { kind: 'comet', target: { by: 'kind', value: 'fileexplorer' }, level: 'strong' });
 });
 
 test('tool_result Grep réussi -> comète vers le fichier', () => {
@@ -16,10 +17,10 @@ test('tool_result Grep réussi -> comète vers le fichier', () => {
   assert.equal(i.target.value, 'b.py');
 });
 
-test('tool_result Glob / LS -> glow doux explorateur', () => {
+test('tool_result Glob / LS -> comète vers explorateur (voyage visible)', () => {
   for (const name of ['Glob', 'LS']) {
     const i = MekiImpulses.impulseFor({ type: 'tool_result', is_error: false, name });
-    assert.deepEqual(i, { kind: 'glow', target: { by: 'kind', value: 'fileexplorer' }, level: 'soft' });
+    assert.deepEqual(i, { kind: 'comet', target: { by: 'kind', value: 'fileexplorer' }, level: 'soft' });
   }
 });
 
