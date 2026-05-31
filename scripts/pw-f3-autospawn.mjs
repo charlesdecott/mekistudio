@@ -28,7 +28,18 @@ const out = {};
 try {
   await p.goto(URL, { waitUntil: 'networkidle', timeout: 30000 });
   await p.waitForSelector('.cmp-chat .chat-input', { timeout: 15000 });
-  await p.waitForTimeout(1500);
+  await p.waitForTimeout(1000);
+  // le viewport persisté peut avoir dérivé (zoom/pan) -> on le réinitialise pour CENTRER le chat
+  // (sinon le champ de saisie peut être hors de la fenêtre Playwright). Puis reload pour appliquer.
+  const chat = await p.evaluate(() => { const w = document.querySelector('.node-wrap[data-kind="chat"]'); return w ? { x: parseFloat(w.style.left) || 0, y: parseFloat(w.style.top) || 0, w: w.offsetWidth, h: w.offsetHeight } : null; });
+  if (chat) {
+    const zoom = 0.35;
+    const v = { x: Math.round(640 - (chat.x + chat.w / 2) * zoom), y: Math.round(360 - (chat.y + chat.h / 2) * zoom), zoom };
+    await p.evaluate((vv) => fetch('/api/canvas/viewport', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(vv) }), v);
+    await p.reload({ waitUntil: 'networkidle', timeout: 30000 });
+    await p.waitForSelector('.cmp-chat .chat-input', { timeout: 15000 });
+    await p.waitForTimeout(1500);
+  }
   out.before = await editorsFor('cli.py');
 
   // 1. SPAWN
@@ -87,7 +98,7 @@ try {
     out.ttlSpawned >= 1 && out.ttlGone === 0;
   console.log(ok ? '✅ PASS' : '❌ FAIL');
 } catch (e) {
-  logs.push(`[script-error] ${e.message}`);
+  console.log('SCRIPT-ERROR:', e.message);
   console.log('RESULTS:', JSON.stringify(out));
 } finally {
   // cleanup : retire l'éditeur cli.py épinglé (laisser le canvas propre pour l'utilisateur)
