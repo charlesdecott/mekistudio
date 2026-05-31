@@ -26,7 +26,7 @@ document.addEventListener('alpine:init', () => {
     _dragDir: { x: 0, y: 0 }, // vecteur cumulatif saisie->curseur (sens du drag pour la collision)
     _pendingSpots: [],       // spots d'éditeurs réservés (spawns concurrents)
     _toolbar: null,          // mini-toolbar ⚡ du node sélectionné
-    _pulsing: false,         // une impulsion est en vol (verrou)
+    _activePulses: 0,        // nb de comètes en vol (concurrentes) ; garde-fou anti-emballement
     _glowTimers: {},         // id -> timeout d'extinction du glow
 
     async init() {
@@ -496,15 +496,18 @@ document.addEventListener('alpine:init', () => {
     },
 
     // Comète orientée fromId -> toId le long des câbles (pathBetween), nodes traversés en glow doux,
-    // cible au niveau `arrivalLevel`. Verrou anti-chevauchement partagé (_pulsing).
+    // cible au niveau `arrivalLevel`. CONCURRENTE : plusieurs comètes peuvent voler en même temps
+    // (chacune ses propres éléments SVG) ; garde-fou _activePulses pour éviter l'emballement sur une
+    // rafale d'outils parallèles. Les segments d'UNE comète restent séquentiels (elle suit son chemin).
     async pulseTo(fromId, toId, arrivalLevel) {
-      if (this._pulsing || !fromId || !toId || fromId === toId) return;
+      if (!fromId || !toId || fromId === toId) return;
+      if (this._activePulses >= 24) return; // anti-emballement (ex. 100 lectures parallèles)
       const boxes = this.nodeBoxes();
       const byId = {};
       boxes.forEach((info, id) => { byId[id] = { id, source: info.source || null }; });
       const path = window.MekiCables.pathBetween(byId, fromId, toId);
       if (!path || !path.length) return;
-      this._pulsing = true;
+      this._activePulses += 1;
       try {
         for (const seg of path) {
           await this.animateComet(seg);
@@ -513,7 +516,7 @@ document.addEventListener('alpine:init', () => {
         }
         this.glow(toId, arrivalLevel || 'strong', 1500);
       } finally {
-        this._pulsing = false;
+        this._activePulses -= 1;
       }
     },
 

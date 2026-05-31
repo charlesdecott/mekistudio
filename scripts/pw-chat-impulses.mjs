@@ -17,13 +17,18 @@ p.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
 // Instrumentation (document-start) : compte impulsions + comètes (circle.comet) + éditeurs glowés.
 await p.addInitScript(() => {
-  window.__imp = 0; window.__comets = 0; window.__editorGlow = [];
+  window.__imp = 0; window.__comets = 0; window.__editorGlow = []; window.__cometNow = 0; window.__cometMax = 0;
   document.addEventListener('meki:impulse', () => { window.__imp++; });
   const mo = new MutationObserver((muts) => {
     for (const m of muts) {
       if (m.type === 'childList') {
         for (const n of m.addedNodes) {
-          if (n.getAttribute && (n.getAttribute('class') || '') === 'comet') window.__comets++;
+          if (n.getAttribute && (n.getAttribute('class') || '') === 'comet') {
+            window.__comets++; window.__cometNow++; window.__cometMax = Math.max(window.__cometMax, window.__cometNow);
+          }
+        }
+        for (const n of m.removedNodes) {
+          if (n.getAttribute && (n.getAttribute('class') || '') === 'comet') window.__cometNow = Math.max(0, window.__cometNow - 1);
         }
       } else if (m.type === 'attributes' && m.attributeName === 'class') {
         const t = m.target;
@@ -84,6 +89,15 @@ try {
   const glowAfterClick = await chatGlow();
   await p.screenshot({ path: join(OUT, 'imp-2-afterclick.png') });
 
+  // (5) CONCURRENCE : 3 comètes dispatchées en même temps doivent voler EN PARALLÈLE
+  await p.evaluate(() => { window.__cometMax = 0; window.__cometNow = 0; });
+  await p.evaluate(() => {
+    const intent = { kind: 'comet', target: { by: 'kind', value: 'fileexplorer' }, level: 'strong' };
+    for (let i = 0; i < 3; i++) document.dispatchEvent(new CustomEvent('meki:impulse', { detail: intent }));
+  });
+  await p.waitForTimeout(350);
+  const cometMax = await p.evaluate(() => window.__cometMax);
+
   // (4) reload : pas d'impulsion au replay
   await p.reload({ waitUntil: 'networkidle', timeout: 30000 });
   await p.waitForSelector('.cmp-chat .chat-input', { timeout: 15000 });
@@ -94,9 +108,10 @@ try {
   console.log('LIVE impulses:', liveImpulses, '| comètes (circle.comet):', comets, '| hook lines:', hookLines);
   console.log('éditeurs glowés:', JSON.stringify(editorGlow));
   console.log('glow chat après tour:', glowAfterTurn, '| persiste +3s:', glowPersists, '| après clic:', glowAfterClick);
+  console.log('CONCURRENCE — max comètes simultanées (3 dispatchées):', cometMax);
   console.log('REPLAY impulses après reload (doit rester 0):', replayImpulses);
   const ok = liveImpulses >= 2 && comets >= 1 && hookLines >= 1 &&
-    glowAfterTurn && glowPersists && !glowAfterClick && replayImpulses === 0;
+    glowAfterTurn && glowPersists && !glowAfterClick && cometMax >= 2 && replayImpulses === 0;
   console.log(ok ? '✅ PASS' : '❌ FAIL');
 } catch (e) {
   logs.push(`[script-error] ${e.message}`);
