@@ -1044,19 +1044,38 @@ document.addEventListener('alpine:init', () => {
         this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
     },
-    // 1er emplacement libre pour un éditeur, ancré à droite de l'explorateur ; évite les
-    // nodes existants ET les spots déjà réservés (spawns concurrents).
+    // Emplacement d'un éditeur spawné : ALÉATOIRE (pas de grille), PLUS LOIN de l'explorateur, et
+    // choisi pour que son câble vers l'explorateur soit DÉGAGÉ (ne passe pas sous un autre node).
+    // On tire des candidats sur un anneau aléatoire autour de l'explorateur ; on garde le 1er qui est
+    // libre ET dont le segment candidat→explorateur ne traverse aucun autre node. Repli : 1er libre.
     editorSpawnPos() {
-      const C = window.MekiCollision;
+      const C = window.MekiCollision, K = window.MekiCables;
       const ex = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
-      let bx = 360, by = 0, bw = 300;
-      if (ex) { bx = parseFloat(ex.style.left) || 0; by = parseFloat(ex.style.top) || 0; bw = ex.offsetWidth || 300; }
-      const anchor = { x: bx + bw + 40, y: by };
-      const others = [];
-      this.$root.querySelectorAll('.node-wrap').forEach((w) => others.push(this.boxOf(w)));
-      this._pendingSpots.forEach((s) => others.push(s));
+      let exb = { x: 360, y: 0, w: 300, h: 200 };
+      if (ex) exb = this.boxOf(ex);
+      const exC = { x: exb.x + exb.w / 2, y: exb.y + exb.h / 2 };
       const size = { w: 520, h: 440 }; // EDITOR_SPAWN_SIZE — refléter file_editor.py
-      const spot = C.findFreeSpot(anchor, size, others, C.GAP);
+      const all = [], cableObs = []; // all = anti-chevauchement ; cableObs = test de câble (SANS l'explorateur, destination)
+      this.$root.querySelectorAll('.node-wrap').forEach((w) => {
+        const box = this.boxOf(w); all.push(box);
+        if (w.dataset.kind !== 'fileexplorer') cableObs.push(box);
+      });
+      this._pendingSpots.forEach((s) => { all.push(s); cableObs.push(s); });
+      const minR = Math.max(exb.w, exb.h) / 2 + 420; // bien plus loin qu'avant (~40px du bord)
+      const at = (x, y) => ({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h });
+      const center = (s) => ({ x: s.x + size.w / 2, y: s.y + size.h / 2 });
+      let fallback = null;
+      for (let i = 0; i < 48; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = minR + Math.random() * 500;
+        const cand = at(exC.x + Math.cos(ang) * dist - size.w / 2, exC.y + Math.sin(ang) * dist - size.h / 2);
+        if (!C.isFree(cand, all, C.GAP)) continue;        // ne pas chevaucher un node existant
+        if (!fallback) fallback = cand;                    // 1er spot libre -> repli si aucun "dégagé"
+        if (K && K.pathHits([center(cand), exC], cableObs)) continue; // câble traverserait un autre node -> on rejette
+        this._pendingSpots.push(cand);
+        return cand;
+      }
+      const spot = fallback || C.findFreeSpot({ x: exC.x + minR, y: exC.y - size.h / 2 }, size, all, C.GAP);
       this._pendingSpots.push({ x: spot.x, y: spot.y, w: size.w, h: size.h });
       return spot;
     },
