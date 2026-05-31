@@ -89,8 +89,19 @@ class ChatBridge:
 
     def _emit_hook(self, name: str, data: dict) -> None:
         """Appelé par un hook émetteur (même boucle asyncio que _consume) -> diffuse un hook_fired
-        transient. put_nowait non bloquant -> pas de verrou requis (cohérent avec le guard)."""
-        self._broadcast(events.hook_fired(name, dict(data) if isinstance(data, dict) else {"raw": data}))
+        transient (put_nowait non bloquant -> pas de verrou requis). On TRIM à un résumé léger
+        json-safe (nom d'outil + chemins) : détaché de l'objet SDK (pas de mutation partagée) et on
+        évite de diffuser le gros `tool_response` du PostToolUse au front."""
+        d = data if isinstance(data, dict) else {}
+        summary: dict = {}
+        if d.get("tool_name"):
+            summary["tool_name"] = str(d["tool_name"])
+        ti = d.get("tool_input")
+        if isinstance(ti, dict):
+            paths = {k: ti[k] for k in ("file_path", "path", "pattern", "glob") if isinstance(ti.get(k), str)}
+            if paths:
+                summary["tool_input"] = paths
+        self._broadcast(events.hook_fired(name, summary))
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         self._subscribers.discard(queue)

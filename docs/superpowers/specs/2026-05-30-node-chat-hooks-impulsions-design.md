@@ -42,7 +42,7 @@ on prévoit seulement le glow-notif persistant). Pas de Write/Edit/Bash (brique 
 | F2.2 | **Déclenchement** | `chat-view.js` **enrichit** un `tool_result` avec `{name, file_path}` (lookup `state.toolsById[ev.id]`, car `tool_result` ne porte que `{id, output, is_error}`), passe l'event enrichi à `MekiImpulses.impulseFor`, et dispatch `CustomEvent('meki:impulse', {detail:intent})`. `canvas.js` écoute, **résout le node cible** et déclenche `animateComet`/`glow` existants. Cible introuvable → **no-op** (ne casse pas). |
 | F2.3 | **Mapping (events fiables)** | Voir §4. Les impulsions roulent sur `tool_use`/`tool_result` (déjà émis, brique D) + `turn_end` + `hook_fired(Notification)` — **indépendant** de la capture incertaine des autres hooks. |
 | F2.4 | **Glow dismissable** | `Stop` → glow **fort** sur le chat ; **clic sur le node chat** → `clearGlow` (acquittement). `Notification` → glow-**notif** persistant ; clic = éteint. *(askUser persistera jusqu'à réponse → brique E, hors scope.)* |
-| F2.5 | **Anti-spam** | `canvas._pulsing` (verrou existant) sérialise les comètes ; sur rafale (ex. 18 reads), des comètes peuvent être **ignorées** (acceptable v1, à `log` côté front si on veut). Les glows ne sont pas bloquants. |
+| F2.5 | **Concurrence** | Les comètes sont **concurrentes** (`canvas._activePulses`, plusieurs en vol en même temps) ; garde-fou à **24** simultanées pour ne pas s'emballer sur une rafale de tools parallèles (au-delà, ignorées). Les glows ne sont pas bloquants. Le hook émetteur est **non bloquant** (`put_nowait` → `{}`), donc l'animation ne ralentit jamais les outils de Claude. |
 | F1.4 | **Smoke d'API hooks** | Test d'intégration `@pytest.mark.integration` (réel SDK, repo tmp, `setting_sources=[]`) : **quels hooks émettent** en session lecture seule, **forme de leur `data`**, et si `[guard, émetteur]` sur PreToolUse **s'exécutent tous deux**. Fige les noms d'attributs (comme le smoke outils D9). |
 
 ## 4. Mapping hook/event → impulsion
@@ -96,8 +96,9 @@ tool_use / tool_result (déjà brique D) ─────────────
   requis, cohérent avec le guard).
 - **Ordre `[guard, émetteur]` sur PreToolUse** : si le SDK n'exécute pas tous les hooks d'une liste, le
   smoke le révèle ; repli = un seul hook PreToolUse qui fait confinement **et** émet.
-- **Rafale de comètes** : `_pulsing` en sérialise une à la fois ; sur 18 reads, beaucoup seront
-  ignorées (acceptable ; on n'empile pas une file de 18 animations). Les glows restent visibles.
+- **Rafale de comètes** : **concurrentes** (`_activePulses`), plafonnées à 24 simultanées (au-delà,
+  ignorées). Chaque comète anime ses propres éléments SVG ; les segments d'UNE comète restent
+  séquentiels. Les glows restent visibles.
 - **Volet hooks live-only** : non persisté → vide au reload (cohérent « moniteur debug »). Pas de
   réplay d'impulsions (transients).
 

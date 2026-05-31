@@ -466,9 +466,15 @@ async def test_emit_hook_broadcasts_hook_fired_not_persisted(tmp_path):
     await bridge.start()
     q = asyncio.Queue()
     await bridge.attach(q, 0)
-    bridge._emit_hook("Notification", {"message": "coucou"})
+    # data TRIMMÉ à un résumé léger json-safe (nom d'outil + chemins ; pas le gros tool_response)
+    bridge._emit_hook("PostToolUse", {"tool_name": "Read", "tool_input": {"file_path": "a.py"}, "tool_response": "x" * 9999})
     ev = await _drain_until(q, "hook_fired")
-    assert ev["name"] == "Notification" and ev["data"] == {"message": "coucou"}
+    assert ev["name"] == "PostToolUse"
+    assert ev["data"] == {"tool_name": "Read", "tool_input": {"file_path": "a.py"}}
+    # un hook sans nom d'outil (ex. Notification) -> résumé vide, mais bien diffusé
+    bridge._emit_hook("Notification", {"message": "coucou"})
+    ev2 = await _drain_until(q, "hook_fired")
+    assert ev2["name"] == "Notification" and ev2["data"] == {}
     recs = await store.read_since(0)
     assert all(r["type"] != "hook_fired" for r in recs)  # transient
     await bridge.shutdown()
