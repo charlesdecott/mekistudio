@@ -88,9 +88,15 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     par défaut : persisté (`Node.ephemeral`+`expires_at_ms`), **auto-supprimé** au TTL (10 min, purge
     au chargement serveur), **survit à un reload**, **clic = épingle** → permanent (`POST .../pin`),
     **dedup** par fichier, **plafond 20**. Validé Playwright (spawn, dedup, survie reload, épingle,
-    TTL→disparition, 0 erreur console). Spec : `docs/superpowers/specs/2026-05-31-node-chat-autospawn-editor-f3a*`.
-  - Reste sur le chat : **F3b — réglages** (modale du chat `configurable` : modes éphémère / plafond-FIFO
-    / illimité + TTL/plafond éditables) · **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
+    TTL→disparition, 0 erreur console). Comète qui **trace le câble** progressivement (pixel par pixel)
+    + placement **aléatoire en secteur libre** (câbles dégagés des nodes). Spec :
+    `docs/superpowers/specs/2026-05-31-node-chat-autospawn-editor-f3a*`.
+  - **Réglages d'auto-spawn (F3b)** (livré, 2026-06-01) : le node chat devient `configurable`
+    (engrenage → modale) — **mode** (éphémère / plafond+recyclage FIFO / illimité) + **TTL** + **plafond**
+    éditables (`ChatComponent.spawn_mode`/`spawn_ttl_min`/`spawn_cap`). Le mode change le spawn
+    (éphémère = aperçu+TTL ; plafond = aperçu plafonné sans TTL ; illimité = éditeur permanent). Validé
+    pytest + Playwright. **Brique F (hooks → impulsions → matérialisation) complète.**
+  - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
     `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.
     Ailleurs : palette d'ajout, multi-onglets.
