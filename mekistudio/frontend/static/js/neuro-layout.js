@@ -105,7 +105,13 @@
 
     const byId = new Map(items.map((it) => [it.id, it]));
     const children = new Map();
-    for (const it of items) { if (!children.has(it.parent)) children.set(it.parent, []); children.get(it.parent).push(it); }
+    for (const it of items) {
+      // parent inconnu (ni un autre item, ni la racine explicite) -> rattaché à la RACINE pour ne jamais
+      // « perdre » un node (ex. fichier à la racine du repo, ou data-source temporairement vide).
+      const key = byId.has(it.parent) ? it.parent : rootId;
+      if (!children.has(key)) children.set(key, []);
+      children.get(key).push(it);
+    }
     const kidsOf = (id) => (children.get(id) || []).slice().sort((a, b) => (a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0));
 
     const center = {}; // id -> {x,y} centre

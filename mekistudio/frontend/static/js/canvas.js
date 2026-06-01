@@ -23,7 +23,7 @@ document.addEventListener('alpine:init', () => {
     _settingsTree: null,
     _compactMode: false,     // brique G : chaîne de dossiers compacte (lu des réglages explorateur)
     _creatingFolders: {},    // path -> true pendant la création d'un node dossier (anti-doublon)
-    _spawnMaterializing: false, // true pendant un auto-spawn -> les dossiers naissent invisibles (matérialisés par la comète)
+    _materializingDepth: 0,  // >0 tant qu'un auto-spawn matérialise -> les dossiers naissent invisibles (comète). Compteur (spawns concurrents).
     _editors: {},            // états des nodes éditeur, indexés par node id
     _chatViews: {},          // handles des vues chat (WS), indexés par node id
     _zTop: 0,                // dernier z-index attribué (premier plan au clic)
@@ -650,22 +650,19 @@ document.addEventListener('alpine:init', () => {
       this._spawning[path] = true;
       this._inFlightSpawns += 1;                            // compte le spawn EN VOL (pas encore dans le DOM) pour le plafond
       this._enforceSpawnCap();
-      // Brique G : matérialise la chaîne de dossiers du fichier, puis ancre l'éditeur sur SA node dossier.
-      const beforeFolders = new Set([...this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')].map((w) => w.dataset.id));
-      this._spawnMaterializing = true; // les dossiers naissent invisibles (matérialisés par la comète, pas de flash)
-      const folderWrap = await this._ensureFolderChain(path);
-      this._spawnMaterializing = false;
-      const newFolders = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')].filter((w) => !beforeFolders.has(w.dataset.id));
-      newFolders.forEach((w) => w.classList.add('spawning')); // sécurité (déjà 'spawning' via le flag)
-      const folderId = folderWrap ? folderWrap.dataset.id : undefined;
-      const pos = this.editorSpawnPos(folderWrap);
+      const created = [];     // dossiers créés par CET appel (suivi précis, pas un diff DOM global -> pas de collision entre spawns concurrents)
+      let pos = null, nodeId = null;
+      this._materializingDepth += 1; // les dossiers naissent invisibles (comète) tant qu'au moins un spawn matérialise
       try {
+        // Brique G : matérialise la chaîne de dossiers du fichier, puis ancre l'éditeur sur SA node dossier.
+        const folderWrap = await this._ensureFolderChain(path, created);
+        const folderId = folderWrap ? folderWrap.dataset.id : undefined;
+        pos = this.editorSpawnPos(folderWrap);
         let node;
         try {
           const r = await fetch('/api/canvas/nodes', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            // F3b : mode 'ephemeral' = aperçu + TTL ; 'capped' = aperçu sans TTL (plafond FIFO) ;
-            // 'unlimited' = éditeur permanent (non éphémère, pas de plafond).
+            // F3b : 'ephemeral' = aperçu + TTL ; 'capped' = aperçu sans TTL (plafond FIFO) ; 'unlimited' = permanent.
             body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, source_id: folderId, ephemeral: this._spawnMode !== 'unlimited', expires_at_ms: this._spawnMode === 'ephemeral' ? Date.now() + this._spawnTtlMs : null }),
           });
           if (!r.ok) return;
@@ -680,40 +677,45 @@ document.addEventListener('alpine:init', () => {
         } catch (e) { /* échec -> annulation */ }
         if (!opened) {
           try { await fetch('/api/canvas/nodes/' + node.id, { method: 'DELETE' }); } catch (e) {} // rollback : pas de node fantôme
-          const cId = this.kindId('chat'), exId = this.kindId('fileexplorer'); // échec d'ouverture -> repli comète explorateur (feedback comme F1/F2)
+          const cId = this.kindId('chat'), exId = this.kindId('fileexplorer'); // échec d'ouverture -> repli comète explorateur
           if (cId && exId) this.pulseTo(cId, exId, 'soft');
-          return;
+          return; // le finally révèle quand même les dossiers créés (jamais d'invisibles bloqués)
         }
         const world = this.$root.querySelector('.world');
         if (!world) return;
         const wrap = this.renderNode(node);               // pose la classe 'ephemeral' + TTL + clic=épingle
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
+        nodeId = node.id;
         this.layoutFolderTree();                           // dispose tout (les neufs sont invisibles) + auto-fit
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
         // cache les câbles de TOUS les nodes neufs (dossiers + éditeur) : la comète les TRACE en arrivant.
         const svg = this.ensureCablesLayer();
-        const newIds = newFolders.map((w) => w.dataset.id).concat([node.id]);
-        const hideCable = (nid) => {
+        const newIds = created.map((w) => w.dataset.id).concat([node.id]);
+        for (const nid of newIds) {
           const g = svg && svg.querySelector('g[data-edge="' + nid + '"]');
           const core = g && g.querySelector('.cable-core');
           if (core) { const L = core.getTotalLength(); g.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = '0 ' + (L + 1); }); }
-        };
-        newIds.forEach(hideCable);
+        }
         const chatId = this.kindId('chat');
         if (chatId) await this.pulseTo(chatId, node.id, 'strong'); // la comète matérialise dossiers + éditeur le long du chemin
-        // sécurité : câbles complets + tout révélé (si la comète a été court-circuitée par l'anti-emballement)
-        for (const nid of newIds) {
+        if (wrap.isConnected) this.glow(node.id, 'strong', 1500); // APPARAÎT
+      } finally {
+        this._materializingDepth = Math.max(0, this._materializingDepth - 1);
+        // TOUJOURS révéler ce que CET appel a créé (dossiers + éditeur) + câbles complets — quelle que soit
+        // la sortie (succès, échec create/open, retour anticipé) : jamais de node bloqué invisible.
+        const svg = this.ensureCablesLayer();
+        const revealIds = created.map((w) => w.dataset.id);
+        if (nodeId) revealIds.push(nodeId);
+        for (const nid of revealIds) {
           const g = svg && svg.querySelector('g[data-edge="' + nid + '"]');
           if (g) g.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = ''; pa.style.strokeDashoffset = ''; });
           const w = this.$root.querySelector('.node-wrap[data-id="' + nid + '"]');
           if (w) w.classList.remove('spawning');
         }
-        if (wrap.isConnected) this.glow(node.id, 'strong', 1500); // APPARAÎT
-      } finally {
         this._inFlightSpawns -= 1;
         delete this._spawning[path];
-        this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
+        if (pos) this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
     },
 
@@ -1290,7 +1292,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     // --- création / suppression de nodes dossier ---
-    async _createFolderNode(path, { pinned = false } = {}) {
+    async _createFolderNode(path, { pinned = false, createdOut = null } = {}) {
       if (!path || this._hasFolderNode(path) || this._creatingFolders[path]) return null;
       this._creatingFolders[path] = true;
       const anchor = this._nearestFolderAnchor(path);
@@ -1306,9 +1308,10 @@ document.addEventListener('alpine:init', () => {
         const world = this.$root.querySelector('.world');
         if (world) {
           const w = this.renderNode(node);
-          // né INVISIBLE pendant une impulsion : la comète le matérialisera (pas de flash avant).
-          if (this._spawnMaterializing) w.classList.add('spawning');
+          // né INVISIBLE tant qu'un spawn matérialise : la comète le matérialisera (pas de flash avant).
+          if (this._materializingDepth > 0) w.classList.add('spawning');
           world.appendChild(w);
+          if (createdOut) createdOut.push(w);
         }
         return node;
       } catch (e) { return null; }
@@ -1441,14 +1444,14 @@ document.addEventListener('alpine:init', () => {
     // Garantit la chaîne de dossiers nécessaire pour `filePath` (création incrémentale).
     // En compact, peut SCINDER : retire les dossiers éphémères que la nouvelle config ne désire plus.
     // Retourne la node dossier hôte du fichier (ou null si à la racine).
-    async _ensureFolderChain(filePath) {
+    async _ensureFolderChain(filePath, createdOut) {
       const dir = window.MekiFolders.dirOf(filePath);
       if (!dir) return null;
       const openFiles = this.openEditorFilePaths().concat([filePath]);
       const desired = window.MekiFolders.desiredFolders(openFiles, { compact: this._compactMode });
       const toCreate = desired.filter((p) => !this._hasFolderNode(p))
         .sort((a, b) => a.split('/').length - b.split('/').length);
-      for (const p of toCreate) await this._createFolderNode(p);
+      for (const p of toCreate) await this._createFolderNode(p, { createdOut }); // createdOut = dossiers créés (suivi par l'appelant)
       if (this._compactMode) {
         const want = new Set(desired);
         const stale = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"].ephemeral')]
