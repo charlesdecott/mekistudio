@@ -38,6 +38,21 @@ def is_file_in_root(root: Path, rel: str) -> bool:
         return False
 
 
+def repo_relpath(root: Path, rel: str) -> str:
+    """Normalise `rel` en chemin posix RELATIF au repo. Refuse traversal (`..`),
+    chemins absolus et toute cible hors de `root` (même sandbox que list_dir/read_file).
+    `""` (racine) accepté. Lève `ValueError` sinon. Sert à valider le `path` d'un
+    node dossier au moment de la création (le canvas ne doit pas stocker un chemin
+    hors-repo qui polluerait le parentage par préfixe et casserait l'arbre)."""
+    base = root.resolve()
+    target = (base / rel).resolve()
+    if target == base:
+        return ""
+    if base not in target.parents:
+        raise ValueError("chemin hors de la racine du repo")
+    return PurePosixPath(*target.relative_to(base).parts).as_posix()
+
+
 def read_file(root: Path, rel: str) -> str:
     """Lit un fichier texte du repo (sandbox + garde binaire/taille/UTF-8)."""
     target = _resolve_in_root(root, rel)

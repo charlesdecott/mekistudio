@@ -734,9 +734,12 @@ document.addEventListener('alpine:init', () => {
       if (w) { w.remove(); this.drawCables(); this.reconcileFolderNodes(); } // brique G : purge dossier vide
     },
 
-    // Plafond : si trop d'auto-spawnés VIVANTS (DOM) + EN VOL, ferme le(s) plus ancien(s) (ordre DOM).
+    // Plafond : si trop d'ÉDITEURS auto-spawnés VIVANTS (DOM) + EN VOL, ferme le(s) plus ancien(s).
+    // Brique G : on ne compte QUE les éditeurs (`data-kind="fileeditor"`) — les nodes dossier sont
+    // éphémères aussi mais leur cycle de vie est compté-référence (reconcileFolderNodes + purge serveur),
+    // pas FIFO ; les inclure ici supprimerait un dossier hébergeant encore des éditeurs.
     _enforceSpawnCap() {
-      const eph = [...this.$root.querySelectorAll('.node-wrap.ephemeral')];
+      const eph = [...this.$root.querySelectorAll('.node-wrap.ephemeral[data-kind="fileeditor"]')];
       const over = eph.length + this._inFlightSpawns - this._spawnCap; // inclut les spawns en vol (pas encore dans le DOM)
       for (let i = 0; i < over && i < eph.length; i++) this._expireEphemeral(eph[i].dataset.id);
     },
@@ -1225,7 +1228,12 @@ document.addEventListener('alpine:init', () => {
     // --- node dossier : helpers de chemin ---
     _hasFolderNode(path) {
       if (!path) return false;
-      return !!this.$root.querySelector('.node-wrap[data-kind="folder"][data-folder="' + path + '"]');
+      // comparaison en JS (pas de sélecteur d'attribut) : un nom de dossier peut contenir un
+      // guillemet/antislash légaux qui casseraient un sélecteur CSS interpolé.
+      for (const w of this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')) {
+        if ((w.dataset.folder || '') === path) return true;
+      }
+      return false;
     },
     _isSegPrefix(prefix, path) {
       if (prefix === '') return true;
@@ -1239,7 +1247,10 @@ document.addEventListener('alpine:init', () => {
     _findFolderForPath(filePath) {
       const dir = window.MekiFolders.dirOf(filePath);
       if (!dir) return null;
-      return this.$root.querySelector('.node-wrap[data-kind="folder"][data-folder="' + dir + '"]');
+      for (const w of this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')) {
+        if ((w.dataset.folder || '') === dir) return w;
+      }
+      return null;
     },
     // Ancre de placement = node dossier ancêtre la plus proche (plus long préfixe), sinon explorateur.
     _nearestFolderAnchor(path) {
@@ -1293,6 +1304,40 @@ document.addEventListener('alpine:init', () => {
         it.classList.toggle('fs-claimed', this._hasFolderNode(it.dataset.path));
       });
     },
+    // Re-câble (DOM) les nodes dossier + éditeurs par plus-long-préfixe — MIROIR du reconcile
+    // serveur. Indispensable APRÈS création/suppression d'un node dossier : insérer un ancêtre ou
+    // un point de branchement doit re-router les enfants existants tout de suite (sinon câble périmé
+    // jusqu'au reload — créations concurrentes hors ordre, split en mode compact). N'attend rien du
+    // serveur (qui réconcilie aussi de son côté), ne touche pas un éditeur SANS fichier (override).
+    _recableFolders() {
+      const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      const cands = [];
+      if (explorer) cands.push({ path: '', id: explorer.dataset.id });
+      this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')
+        .forEach((w) => cands.push({ path: w.dataset.folder || '', id: w.dataset.id }));
+      const longest = (target, selfId, strict) => {
+        let bestId = null, bestLen = -1;
+        for (const c of cands) {
+          if (c.id === selfId) continue;
+          if (strict && c.path === target) continue;
+          if (this._isSegPrefix(c.path, target)) {
+            const n = c.path === '' ? 0 : c.path.split('/').length;
+            if (n > bestLen) { bestLen = n; bestId = c.id; }
+          }
+        }
+        return bestId;
+      };
+      this.$root.querySelectorAll('.node-wrap[data-kind="folder"]').forEach((w) => {
+        const pid = longest(w.dataset.folder || '', w.dataset.id, true); // dossier : préfixe STRICT
+        if (pid) w.dataset.source = pid;
+      });
+      this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]').forEach((w) => {
+        const f = w.dataset.file;
+        if (!f) return; // éditeur sans fichier ouvert -> on garde son lien (override create->open)
+        const pid = longest(window.MekiFolders.dirOf(f), w.dataset.id, false); // éditeur : égalité permise
+        if (pid) w.dataset.source = pid;
+      });
+    },
 
     // Garantit la chaîne de dossiers nécessaire pour `filePath` (création incrémentale).
     // En compact, peut SCINDER : retire les dossiers éphémères que la nouvelle config ne désire plus.
@@ -1312,6 +1357,7 @@ document.addEventListener('alpine:init', () => {
         for (const w of stale) await this._removeFolderNode(w);
       }
       this._refreshFolderClaims();
+      this._recableFolders();
       this.drawCables();
       return this._findFolderForPath(filePath);
     },
@@ -1330,6 +1376,7 @@ document.addEventListener('alpine:init', () => {
         .filter((w) => !desired.has(w.dataset.folder));
       for (const w of toRemove) await this._removeFolderNode(w);
       this._refreshFolderClaims();
+      this._recableFolders();
       this.drawCables();
     },
 
@@ -1338,6 +1385,7 @@ document.addEventListener('alpine:init', () => {
       if (!path || this._hasFolderNode(path)) return;
       await this._createFolderNode(path, { pinned: true });
       this._refreshFolderClaims();
+      this._recableFolders();
       this.drawCables();
     },
 
@@ -1368,6 +1416,7 @@ document.addEventListener('alpine:init', () => {
         await this._removeFolderNode(wrap); // non destructif : enfants rebranchés au grand-parent
       }
       this._refreshFolderClaims();
+      this._recableFolders();
       this.drawCables();
     },
 

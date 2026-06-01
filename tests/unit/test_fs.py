@@ -5,6 +5,16 @@ import pytest
 from mekistudio.backend import fs
 
 
+def test_repo_relpath_normalizes_and_rejects(tmp_path):
+    assert fs.repo_relpath(tmp_path, "docs/superpowers") == "docs/superpowers"
+    assert fs.repo_relpath(tmp_path, "") == ""
+    assert fs.repo_relpath(tmp_path, "a/./b") == "a/b"  # normalisé
+    with pytest.raises(ValueError):
+        fs.repo_relpath(tmp_path, "../etc")
+    with pytest.raises(ValueError):
+        fs.repo_relpath(tmp_path, "/etc/passwd")
+
+
 def test_list_dir_sorts_dirs_first(tmp_path):
     (tmp_path / "z_dir").mkdir()
     (tmp_path / "b_dir").mkdir()

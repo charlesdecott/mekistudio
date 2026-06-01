@@ -87,7 +87,12 @@ def derive_source_id(state: CanvasState, node: Node) -> str | None:
         return None
     if node.kind in PATH_BASED_KINDS:
         ep = node_effective_path(node)
-        if ep is None:  # éditeur pas encore ouvert -> fallback par kind (explorateur)
+        if ep is None:
+            # éditeur pas encore ouvert (fenêtre create -> /open) : on CONSERVE son parent
+            # persisté s'il référence encore un node existant (sinon il serait arraché de sa
+            # node dossier par un GET intercalé, qui la purgerait). À défaut, fallback par kind.
+            if node.source_id and any(n.id == node.source_id for n in state.nodes):
+                return node.source_id
             return canonical_parent_id(state, node.kind)
         pid = longest_prefix_id(
             ep, _path_candidates(state, exclude=node), strict=(node.kind == folder.KIND)

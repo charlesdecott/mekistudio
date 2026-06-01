@@ -25,6 +25,7 @@ from mekistudio.backend.nodes import (
     build_node,
     default_canvas,
     derive_source_id,
+    reconcile_source_links,
 )
 
 router = APIRouter()
@@ -213,8 +214,14 @@ async def create_node(request: Request, body: NodeCreate) -> dict:
         if len(state.nodes) >= MAX_NODES:
             raise HTTPException(status_code=422, detail="trop de nodes sur le canvas")
         # Un node dossier porte un chemin (mini-explorateur enraciné + parentage par préfixe).
+        # Le chemin est VALIDÉ/normalisé côté serveur (sandbox repo) : pas de `..`/absolu qui
+        # casserait l'arbre de parentage ou ferait pointer le mini-explorateur hors du repo.
         if body.kind == FOLDER_KIND:
-            node = build_node(body.kind, x=body.x, y=body.y, path=body.path or "")
+            try:
+                folder_path = fs.repo_relpath(root, body.path or "")
+            except ValueError:
+                raise HTTPException(status_code=422, detail="chemin de dossier invalide")
+            node = build_node(body.kind, x=body.x, y=body.y, path=folder_path)
         else:
             node = build_node(body.kind, x=body.x, y=body.y)
         # source_id dérivé côté serveur (le client n'a rien à envoyer) ; override
@@ -227,6 +234,11 @@ async def create_node(request: Request, body: NodeCreate) -> dict:
         node.ephemeral = body.ephemeral
         node.expires_at_ms = body.expires_at_ms
         state.nodes.append(node)
+        # Brique G : insérer un node dossier peut re-parenter par préfixe des nodes existants
+        # (un dossier plus profond créé AVANT son ancêtre lors d'une rafale, ou un point de
+        # branchement en mode compact) -> on réconcilie tout l'arbre dans l'état persisté.
+        if body.kind == FOLDER_KIND:
+            reconcile_source_links(state)
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
 

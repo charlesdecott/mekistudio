@@ -491,6 +491,44 @@ def test_get_canvas_keeps_pinned_empty_folder(tmp_path):
     assert pinned["id"] in ids  # épinglé -> conservé même vide
 
 
+def test_create_folder_rejects_traversal_and_absolute(tmp_path):
+    client = _client(tmp_path)
+    assert client.post("/api/canvas/nodes", json={"kind": "folder", "x": 1, "y": 1, "path": "../../etc"}).status_code == 422
+    assert client.post("/api/canvas/nodes", json={"kind": "folder", "x": 1, "y": 1, "path": "/etc/passwd"}).status_code == 422
+    # chemin relatif valide -> normalisé (le "." est collapsé)
+    ok = client.post("/api/canvas/nodes", json={"kind": "folder", "x": 1, "y": 1, "path": "docs/./superpowers"}).json()
+    assert ok["path"] == "docs/superpowers"
+
+
+def test_get_canvas_keeps_folder_for_editor_not_yet_opened(tmp_path):
+    # Régression : un GET intercalé entre la création de l'éditeur (source_id=dossier, SANS fichier)
+    # et /open ne doit ni re-parenter l'éditeur vers l'explorateur ni purger sa node dossier.
+    (tmp_path / "docs").mkdir()
+    client = _client(tmp_path)
+    folder = _mk_folder(client, "docs", ephemeral=True)
+    ed = client.post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 5, "y": 5, "ephemeral": True, "source_id": folder["id"]},
+    ).json()
+    nodes = client.get("/api/canvas").json()["nodes"]  # GET = passe de reconcile + purge
+    ids = {n["id"] for n in nodes}
+    assert folder["id"] in ids  # dossier conservé (l'éditeur le référence encore)
+    assert next(n for n in nodes if n["id"] == ed["id"])["source_id"] == folder["id"]
+
+
+def test_create_folder_reconciles_out_of_order_children(tmp_path):
+    # Régression : créer un dossier PROFOND avant son ancêtre, puis l'ancêtre -> le profond se
+    # re-parente sous l'ancêtre (reconcile au create d'un dossier), pas seulement au reload.
+    (tmp_path / "src" / "foo").mkdir(parents=True)
+    client = _client(tmp_path)
+    # épinglés (ephemeral=False) pour isoler le reconcile du purge des dossiers vides.
+    deep = _mk_folder(client, "src/foo", ephemeral=False)
+    assert deep["source_id"] == _ids_by_kind(client)["fileexplorer"]  # src absent -> explorateur
+    src = _mk_folder(client, "src", ephemeral=False)
+    nodes = client.get("/api/canvas").json()["nodes"]
+    assert next(n for n in nodes if n["id"] == deep["id"])["source_id"] == src["id"]
+
+
 def test_explorer_compact_chain_setting_persists(tmp_path):
     client = _client(tmp_path)
     eid = _ids_by_kind(client)["fileexplorer"]
