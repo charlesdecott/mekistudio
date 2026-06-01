@@ -20,5 +20,6 @@ def build_chat_node(x: float = -440.0, y: float = 0.0) -> Node:
         h=520.0,
         movable=True,
         resizable=True,
+        configurable=True,  # F3b : engrenage -> réglages de l'auto-spawn d'éditeurs
         root=NodeComponent(children=[LayoutComponent(children=[ChatComponent()])]),
     )

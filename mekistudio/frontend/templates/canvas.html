@@ -71,20 +71,42 @@
           <button type="button" class="modal-x" @click="closeSettings()">✕</button>
         </div>
         <div class="modal-body">
-          <p class="modal-label">Fichiers / dossiers exclus</p>
-          <ul class="exclude-list">
-            <template x-for="(ex, i) in settingsExcludes" :key="i">
-              <li>
-                <span x-text="ex"></span>
-                <button type="button" @click="removeExclude(i)" title="Retirer">✕</button>
-              </li>
-            </template>
-            <li x-show="settingsExcludes.length === 0" class="exclude-empty">aucune exclusion</li>
-          </ul>
-          <form class="exclude-add" @submit.prevent="addExclude()">
-            <input type="text" x-model="newExclude" placeholder="nom simple : .git, node_modules">
-            <button type="submit">Ajouter</button>
-          </form>
+          <template x-if="settingsKind === 'chat'">
+            <div class="chat-spawn-settings">
+              <p class="modal-label">Aperçus d'éditeurs (fichiers lus par Claude)</p>
+              <label class="modal-row">Mode
+                <select x-model="settingsMode">
+                  <option value="ephemeral">Éphémère — disparaît après le délai</option>
+                  <option value="capped">Plafond — recyclage du plus ancien (FIFO)</option>
+                  <option value="unlimited">Illimité — éditeurs permanents</option>
+                </select>
+              </label>
+              <label class="modal-row" x-show="settingsMode === 'ephemeral'">Délai (min)
+                <input type="number" min="1" max="1440" x-model.number="settingsTtl">
+              </label>
+              <label class="modal-row" x-show="settingsMode !== 'unlimited'">Plafond (nb max)
+                <input type="number" min="1" max="200" x-model.number="settingsCap">
+              </label>
+            </div>
+          </template>
+          <template x-if="settingsKind !== 'chat'">
+            <div>
+              <p class="modal-label">Fichiers / dossiers exclus</p>
+              <ul class="exclude-list">
+                <template x-for="(ex, i) in settingsExcludes" :key="i">
+                  <li>
+                    <span x-text="ex"></span>
+                    <button type="button" @click="removeExclude(i)" title="Retirer">✕</button>
+                  </li>
+                </template>
+                <li x-show="settingsExcludes.length === 0" class="exclude-empty">aucune exclusion</li>
+              </ul>
+              <form class="exclude-add" @submit.prevent="addExclude()">
+                <input type="text" x-model="newExclude" placeholder="nom simple : .git, node_modules">
+                <button type="submit">Ajouter</button>
+              </form>
+            </div>
+          </template>
           <p class="modal-error" x-show="settingsError" x-cloak x-text="settingsError"></p>
         </div>
         <div class="modal-foot">

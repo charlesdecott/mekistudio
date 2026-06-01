@@ -15,6 +15,10 @@ document.addEventListener('alpine:init', () => {
     newExclude: '',
     settingsError: '',
     settingsNode: null,
+    settingsKind: '',        // F3b : 'chat' -> formulaire d'auto-spawn ; sinon exclusions (fileExplorer)
+    settingsMode: 'ephemeral',
+    settingsTtl: 10,
+    settingsCap: 20,
     _settingsTree: null,
     _editors: {},            // états des nodes éditeur, indexés par node id
     _chatViews: {},          // handles des vues chat (WS), indexés par node id
@@ -34,8 +38,9 @@ document.addEventListener('alpine:init', () => {
     _pinHandlers: {},        // id -> handler click d'épingle (clic = garder)
     _spawning: {},           // file_path -> true pendant un spawn (anti double-spawn en rafale)
     _inFlightSpawns: 0,      // spawns en cours (pas encore dans le DOM) -> comptés par le plafond
-    _spawnTtlMs: 600000,     // 10 min (F3b : configurable via les réglages du chat)
-    _spawnCap: 20,           // max d'auto-spawnés vivants (F3b : configurable)
+    _spawnMode: 'ephemeral', // F3b : 'ephemeral' (TTL) | 'capped' (plafond FIFO) | 'unlimited'
+    _spawnTtlMs: 600000,     // 10 min (lu des réglages du chat ; F3b)
+    _spawnCap: 20,           // max d'auto-spawnés vivants (lu des réglages du chat ; F3b)
 
     async init() {
       let state = {};
@@ -48,6 +53,7 @@ document.addEventListener('alpine:init', () => {
       if (v) this.view = v;
       const nodes = state.nodes || [];
       this.renderNodes(nodes);
+      this._readSpawnSettings(nodes); // F3b : applique les réglages d'auto-spawn du chat
       this.reconcileOverlaps();   // sépare les nodes hérités qui se chevauchent (zéro recouvrement)
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
@@ -544,6 +550,22 @@ document.addEventListener('alpine:init', () => {
       return '';
     },
 
+    // F3b : trouve le ChatComponent dans un arbre, et lit ses réglages d'auto-spawn vers l'état front.
+    _findChat(comp) {
+      if (!comp) return null;
+      if (comp.type === 'chat') return comp;
+      for (const c of (comp.children || [])) { const f = this._findChat(c); if (f) return f; }
+      return null;
+    },
+    _readSpawnSettings(nodes) {
+      const chatNode = (nodes || []).find((n) => n.kind === 'chat');
+      const chat = chatNode && this._findChat(chatNode.root);
+      if (!chat) return;
+      this._spawnMode = chat.spawn_mode || 'ephemeral';
+      this._spawnTtlMs = (chat.spawn_ttl_min || 10) * 60000;
+      this._spawnCap = chat.spawn_cap || 20;
+    },
+
     editorIdForFile(filePath) {
       if (!filePath) return null;
       // match robuste (relatif/absolu/./), via le matcher PUR teste de chat-impulses.
@@ -599,7 +621,7 @@ document.addEventListener('alpine:init', () => {
         const chatId = this.kindId('chat');
         if (chatId) this.pulseTo(chatId, existing, 'strong');
         const w = this.$root.querySelector('.node-wrap[data-id="' + existing + '"]');
-        if (w && w.classList.contains('ephemeral')) this._rearmTtl(existing); // ré-arme seulement si encore éphémère
+        if (this._spawnMode === 'ephemeral' && w && w.classList.contains('ephemeral')) this._rearmTtl(existing); // TTL ré-armé (mode éphémère)
         return;
       }
       this._spawning[path] = true;
@@ -611,7 +633,9 @@ document.addEventListener('alpine:init', () => {
         try {
           const r = await fetch('/api/canvas/nodes', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, ephemeral: true, expires_at_ms: Date.now() + this._spawnTtlMs }),
+            // F3b : mode 'ephemeral' = aperçu + TTL ; 'capped' = aperçu sans TTL (plafond FIFO) ;
+            // 'unlimited' = éditeur permanent (non éphémère, pas de plafond).
+            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, ephemeral: this._spawnMode !== 'unlimited', expires_at_ms: this._spawnMode === 'ephemeral' ? Date.now() + this._spawnTtlMs : null }),
           });
           if (!r.ok) return;
           node = await r.json();
@@ -853,13 +877,21 @@ document.addEventListener('alpine:init', () => {
       return null;
     },
     openSettings(node) {
-      const ft = this.findFileTree(node.root);
       this.settingsNode = node;
-      this._settingsTree = ft;
-      this.settingsTitle = 'Réglages — ' + (node.kind || 'node');
-      this.settingsExcludes = ft ? [...(ft.excludes || [])] : [];
-      this.newExclude = '';
+      this.settingsKind = node.kind || '';
       this.settingsError = '';
+      this.settingsTitle = 'Réglages — ' + (node.kind || 'node');
+      if (node.kind === 'chat') { // F3b : réglages d'auto-spawn
+        const chat = this._findChat(node.root);
+        this.settingsMode = (chat && chat.spawn_mode) || 'ephemeral';
+        this.settingsTtl = (chat && chat.spawn_ttl_min) || 10;
+        this.settingsCap = (chat && chat.spawn_cap) || 20;
+      } else {
+        const ft = this.findFileTree(node.root);
+        this._settingsTree = ft;
+        this.settingsExcludes = ft ? [...(ft.excludes || [])] : [];
+        this.newExclude = '';
+      }
       this.settingsOpen = true;
     },
     addExclude() {
@@ -879,21 +911,31 @@ document.addEventListener('alpine:init', () => {
       const node = this.settingsNode;
       if (!node) return;
       this.settingsError = '';
+      const isChat = this.settingsKind === 'chat';
+      const body = isChat
+        ? { spawn_mode: this.settingsMode, spawn_ttl_min: Number(this.settingsTtl), spawn_cap: Number(this.settingsCap) }
+        : { excludes: this.settingsExcludes };
       try {
         const r = await fetch('/api/canvas/nodes/' + node.id + '/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ excludes: this.settingsExcludes }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
         if (!r.ok) { this.settingsError = "Échec de l'enregistrement (HTTP " + r.status + ')'; return; }
       } catch (e) {
         this.settingsError = 'Échec réseau lors de l\'enregistrement';
         return;
       }
+      if (isChat) { // F3b : applique en DIRECT au front + au composant en mémoire (pas de re-render du chat)
+        this._spawnMode = this.settingsMode;
+        this._spawnTtlMs = Number(this.settingsTtl) * 60000;
+        this._spawnCap = Number(this.settingsCap);
+        const chat = this._findChat(node.root);
+        if (chat) { chat.spawn_mode = this.settingsMode; chat.spawn_ttl_min = Number(this.settingsTtl); chat.spawn_cap = Number(this.settingsCap); }
+        this.settingsOpen = false;
+        return;
+      }
       if (this._settingsTree) this._settingsTree.excludes = [...this.settingsExcludes];
       this.settingsOpen = false;
-      // Re-rend UNIQUEMENT le node configuré (filetree avec les nouvelles
-      // exclusions), pas tout le canvas : n'altère pas le node éditeur.
+      // Re-rend UNIQUEMENT le node configuré (filetree avec les nouvelles exclusions).
       this.rerenderNode(node);
     },
     // Re-rend un seul node en place : évite de re-monter l'EditorView (fuite)

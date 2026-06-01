@@ -370,3 +370,35 @@ def test_get_canvas_keeps_permanent_and_ephemeral_without_expiry(tmp_path):
     ).json()["id"]  # éphémère SANS date d'expiration -> pas purgé
     ids = {n["id"] for n in client.get("/api/canvas").json()["nodes"]}
     assert perm in ids and eph_noexp in ids
+
+
+# --- brique F3b : réglages de l'auto-spawn (node chat configurable) ---
+
+def _chat(client):
+    nodes = client.get("/api/canvas").json()["nodes"]
+    chat = next(n for n in nodes if n["kind"] == "chat")
+    return chat, chat["root"]["children"][0]["children"][0]
+
+
+def test_chat_node_is_configurable_with_spawn_defaults(tmp_path):
+    chat, comp = _chat(_client(tmp_path))
+    assert chat["configurable"] is True
+    assert comp["type"] == "chat"
+    assert comp["spawn_mode"] == "ephemeral" and comp["spawn_ttl_min"] == 10 and comp["spawn_cap"] == 20
+
+
+def test_chat_spawn_settings_update_and_persist(tmp_path):
+    client = _client(tmp_path)
+    cid = _chat(client)[0]["id"]
+    r = client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_mode": "capped", "spawn_ttl_min": 30, "spawn_cap": 8})
+    assert r.status_code == 200
+    _, comp = _chat(client)
+    assert comp["spawn_mode"] == "capped" and comp["spawn_ttl_min"] == 30 and comp["spawn_cap"] == 8
+
+
+def test_chat_spawn_settings_validation(tmp_path):
+    client = _client(tmp_path)
+    cid = _chat(client)[0]["id"]
+    assert client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_mode": "bogus"}).status_code == 422
+    assert client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_cap": 0}).status_code == 422
+    assert client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_ttl_min": 0}).status_code == 422

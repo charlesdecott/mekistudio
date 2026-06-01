@@ -4,7 +4,7 @@ import asyncio
 import math
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from mekistudio.backend import bootstrap, fs
 from mekistudio.backend.components import (
+    ChatComponent,
     EditorComponent,
     FileTreeComponent,
     iter_components,
@@ -56,9 +57,12 @@ _ExcludeName = Annotated[str, Field(max_length=255)]
 
 class NodeSettings(BaseModel):
     """Réglages d'un node configurable. `excludes` : noms masqués (fileExplorer).
-    Borné (≤200) pour ne pas gonfler canvas.json ni la query line de /api/fs."""
+    `spawn_*` : auto-spawn d'éditeurs (chat, F3b). Bornés pour ne pas gonfler canvas.json."""
 
     excludes: list[_ExcludeName] | None = Field(default=None, max_length=200)
+    spawn_mode: Literal["ephemeral", "capped", "unlimited"] | None = None
+    spawn_ttl_min: int | None = Field(default=None, ge=1, le=1440)
+    spawn_cap: int | None = Field(default=None, ge=1, le=200)
 
 
 class NodeOpen(BaseModel):
@@ -300,6 +304,16 @@ async def update_node_settings(
                     if name not in clean:
                         clean.append(name)
                 tree.excludes = clean
+
+        # F3b : réglages d'auto-spawn sur le ChatComponent du node chat.
+        chat = next((c for c in iter_components(node.root) if isinstance(c, ChatComponent)), None)
+        if chat is not None:
+            if settings.spawn_mode is not None:
+                chat.spawn_mode = settings.spawn_mode
+            if settings.spawn_ttl_min is not None:
+                chat.spawn_ttl_min = settings.spawn_ttl_min
+            if settings.spawn_cap is not None:
+                chat.spawn_cap = settings.spawn_cap
 
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")

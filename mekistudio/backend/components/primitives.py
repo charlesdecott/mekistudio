@@ -64,6 +64,11 @@ class ChatComponent(ComponentBase):
     conversation_id: str = Field(default_factory=new_id)
     title: str = "chat"
     placeholder: str = "Écris à Claude…"
+    # F3b : réglages de l'auto-spawn d'éditeurs (brique F3). ephemeral = aperçus TTL épinglables ;
+    # capped = persistants plafonnés (FIFO) ; unlimited = persistants sans limite.
+    spawn_mode: Literal["ephemeral", "capped", "unlimited"] = "ephemeral"
+    spawn_ttl_min: int = Field(default=10, ge=1, le=1440)
+    spawn_cap: int = Field(default=20, ge=1, le=200)
 
 
 # Union discriminée : le champ `type` sélectionne la classe au parsing. C'est
