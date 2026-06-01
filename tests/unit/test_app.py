@@ -29,9 +29,9 @@ def test_get_canvas_returns_state(tmp_path):
     r = _client(tmp_path).get("/api/canvas")
     assert r.status_code == 200
     body = r.json()
-    # Built-in : kernel + explorateur (l'éditeur est dynamique).
+    # Built-in : kernel + git + explorateur + chat (l'éditeur/dossier sont dynamiques).
     kinds = {n["kind"] for n in body["nodes"]}
-    assert kinds == {"kernel", "fileexplorer", "chat"}
+    assert kinds == {"kernel", "gitbranch", "fileexplorer", "chat"}
     assert all(n["root"]["type"] == "node" for n in body["nodes"])
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 
@@ -402,3 +402,90 @@ def test_chat_spawn_settings_validation(tmp_path):
     assert client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_mode": "bogus"}).status_code == 422
     assert client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_cap": 0}).status_code == 422
     assert client.post(f"/api/canvas/nodes/{cid}/settings", json={"spawn_ttl_min": 0}).status_code == 422
+
+
+# --- brique G : node git, node dossier, parentage path-aware, réduire, purge ---
+
+
+def test_git_branch_endpoint(tmp_path):
+    # tmp_path n'est pas un repo git -> réponse neutre, 200.
+    r = _client(tmp_path).get("/api/git/branch")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {"branch", "detached", "dirty", "ahead", "behind"}
+
+
+def test_default_canvas_git_topology_via_api(tmp_path):
+    nodes = _client(tmp_path).get("/api/canvas").json()["nodes"]
+    by = {n["kind"]: n for n in nodes}
+    assert by["gitbranch"]["source_id"] == by["kernel"]["id"]
+    assert by["fileexplorer"]["source_id"] == by["gitbranch"]["id"]
+    assert by["chat"]["source_id"] == by["gitbranch"]["id"]
+
+
+def test_gitbranch_is_builtin_non_deletable(tmp_path):
+    client = _client(tmp_path)
+    gid = _ids_by_kind(client)["gitbranch"]
+    assert client.delete(f"/api/canvas/nodes/{gid}").status_code == 422
+
+
+def test_create_folder_node_stores_path_and_derives_parent(tmp_path):
+    client = _client(tmp_path)
+    ids = _ids_by_kind(client)
+    docs = client.post("/api/canvas/nodes", json={"kind": "folder", "x": 1, "y": 1, "path": "docs"}).json()
+    assert docs["kind"] == "folder" and docs["path"] == "docs"
+    assert docs["source_id"] == ids["fileexplorer"]  # racine -> explorateur
+    sub = client.post(
+        "/api/canvas/nodes", json={"kind": "folder", "x": 2, "y": 2, "path": "docs/superpowers"}
+    ).json()
+    assert sub["source_id"] == docs["id"]  # sous-dossier -> dossier parent (préfixe)
+
+
+def test_create_editor_parents_to_folder_via_override(tmp_path):
+    client = _client(tmp_path)
+    docs = client.post("/api/canvas/nodes", json={"kind": "folder", "x": 1, "y": 1, "path": "docs"}).json()
+    ed = client.post(
+        "/api/canvas/nodes", json={"kind": "fileeditor", "x": 3, "y": 3, "source_id": docs["id"]}
+    ).json()
+    assert ed["source_id"] == docs["id"]
+
+
+def test_collapse_node_persists(tmp_path):
+    client = _client(tmp_path)
+    gid = _ids_by_kind(client)["gitbranch"]
+    r = client.post(f"/api/canvas/nodes/{gid}", json={"collapsed": True})
+    assert r.status_code == 200 and r.json()["collapsed"] is True
+    nodes = client.get("/api/canvas").json()["nodes"]
+    assert next(n for n in nodes if n["id"] == gid)["collapsed"] is True
+
+
+def _mk_folder(client, path, *, ephemeral, source_id=None):
+    body = {"kind": "folder", "x": 1, "y": 1, "path": path, "ephemeral": ephemeral}
+    if source_id:
+        body["source_id"] = source_id
+    return client.post("/api/canvas/nodes", json=body).json()
+
+
+def test_get_canvas_purges_empty_ephemeral_folder_chain(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "sp").mkdir()
+    (tmp_path / "docs" / "sp" / "x.md").write_text("x")
+    client = _client(tmp_path)
+    d = _mk_folder(client, "docs", ephemeral=True)
+    s = _mk_folder(client, "docs/sp", ephemeral=True)
+    # éditeur éphémère expiré sous docs/sp
+    ed = client.post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 5, "y": 5, "ephemeral": True, "expires_at_ms": 1, "source_id": s["id"]},
+    ).json()
+    client.post(f"/api/canvas/nodes/{ed['id']}/open", json={"path": "docs/sp/x.md"})
+    ids = {n["id"] for n in client.get("/api/canvas").json()["nodes"]}
+    # l'éditeur expiré ET la chaîne de dossiers vides (éphémères) sont purgés (fixpoint)
+    assert ed["id"] not in ids and s["id"] not in ids and d["id"] not in ids
+
+
+def test_get_canvas_keeps_pinned_empty_folder(tmp_path):
+    client = _client(tmp_path)
+    pinned = _mk_folder(client, "docs", ephemeral=False)  # épinglé (sorti à la main)
+    ids = {n["id"] for n in client.get("/api/canvas").json()["nodes"]}
+    assert pinned["id"] in ids  # épinglé -> conservé même vide

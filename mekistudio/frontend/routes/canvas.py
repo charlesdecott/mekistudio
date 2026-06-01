@@ -20,10 +20,11 @@ from mekistudio.backend.components import (
 )
 from mekistudio.backend.models import Viewport
 from mekistudio.backend.nodes import (
+    FOLDER_KIND,
     NODE_BUILDERS,
     build_node,
-    canonical_parent_id,
     default_canvas,
+    derive_source_id,
 )
 
 router = APIRouter()
@@ -43,12 +44,13 @@ _canvas_lock = asyncio.Lock()
 
 
 class NodeUpdate(BaseModel):
-    """Patch partiel d'un node : position et/ou taille."""
+    """Patch partiel d'un node : position, taille, et/ou état réduit (collapsed)."""
 
     x: float | None = None
     y: float | None = None
     w: float | None = None
     h: float | None = None
+    collapsed: bool | None = None  # brique G : node réduit (barre de titre seule)
 
 
 # Un nom d'exclusion : borné (255 = longueur max usuelle d'un nom de fichier).
@@ -82,6 +84,7 @@ class NodeCreate(BaseModel):
     source_id: str | None = None
     ephemeral: bool = False
     expires_at_ms: int | None = None
+    path: Annotated[str, Field(max_length=4096)] | None = None  # brique G : chemin d'un node dossier
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -124,9 +127,21 @@ async def get_canvas(request: Request) -> dict:
     async with _canvas_lock:
         state = bootstrap.load_canvas(root)
         # Brique F3 : purge les éditeurs éphémères dont le TTL est dépassé (évite la résurrection
-        # d'aperçus expirés après un redémarrage serveur / reload). Sauve seulement si ça change.
+        # d'aperçus expirés après un redémarrage serveur / reload).
         now = int(time.time() * 1000)
         alive = [n for n in state.nodes if not (n.ephemeral and n.expires_at_ms is not None and n.expires_at_ms < now)]
+        # Brique G : purge comptée-référence des nodes dossier ÉPHÉMÈRES sans enfant affiché.
+        # Fixpoint : effondre une chaîne de dossiers vides de bas en haut (le retrait d'un
+        # enfant peut vider son parent au tour suivant). Les dossiers ÉPINGLÉS sont conservés.
+        while True:
+            child_ids = {n.source_id for n in alive if n.source_id}
+            survivors = [
+                n for n in alive
+                if not (n.kind == FOLDER_KIND and n.ephemeral and n.id not in child_ids)
+            ]
+            if len(survivors) == len(alive):
+                break
+            alive = survivors
         if len(alive) != len(state.nodes):
             state.nodes = alive
             bootstrap.save_canvas(root, state)
@@ -161,11 +176,12 @@ async def update_node(request: Request, node_id: str, upd: NodeUpdate) -> dict:
 
         moving = upd.x is not None or upd.y is not None
         resizing = upd.w is not None or upd.h is not None
+        collapsing = upd.collapsed is not None
         if moving and not node.movable:
             raise HTTPException(status_code=422, detail="node non déplaçable")
         if resizing and not node.resizable:
             raise HTTPException(status_code=422, detail="node non redimensionnable")
-        if not moving and not resizing:
+        if not moving and not resizing and not collapsing:
             return node.model_dump(mode="json")  # rien à faire : pas d'écriture
 
         if upd.x is not None:
@@ -176,6 +192,8 @@ async def update_node(request: Request, node_id: str, upd: NodeUpdate) -> dict:
             node.w = _clamp(upd.w, MIN_W, node.max_w)
         if upd.h is not None:
             node.h = _clamp(upd.h, MIN_H, node.max_h)
+        if upd.collapsed is not None:
+            node.collapsed = upd.collapsed  # réduire/agrandir : sans contrainte movable/resizable
 
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
@@ -193,13 +211,18 @@ async def create_node(request: Request, body: NodeCreate) -> dict:
         state = bootstrap.load_canvas(root)
         if len(state.nodes) >= MAX_NODES:
             raise HTTPException(status_code=422, detail="trop de nodes sur le canvas")
-        node = build_node(body.kind, x=body.x, y=body.y)
+        # Un node dossier porte un chemin (mini-explorateur enraciné + parentage par préfixe).
+        if body.kind == FOLDER_KIND:
+            node = build_node(body.kind, x=body.x, y=body.y, path=body.path or "")
+        else:
+            node = build_node(body.kind, x=body.x, y=body.y)
         # source_id dérivé côté serveur (le client n'a rien à envoyer) ; override
-        # accepté seulement s'il référence un node existant.
+        # accepté seulement s'il référence un node existant. Sinon : path-aware
+        # (folder/fileeditor par préfixe de chemin) ou par kind.
         if body.source_id and any(n.id == body.source_id for n in state.nodes):
             node.source_id = body.source_id
         else:
-            node.source_id = canonical_parent_id(state, body.kind)
+            node.source_id = derive_source_id(state, node)
         node.ephemeral = body.ephemeral
         node.expires_at_ms = body.expires_at_ms
         state.nodes.append(node)

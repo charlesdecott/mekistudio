@@ -79,11 +79,11 @@ def test_build_node_by_kind():
 
 
 def test_default_canvas_has_builtin_nodes():
-    # Built-in = kernel + explorateur + chat. L'éditeur est dynamique (spawné au double-clic).
+    # Built-in = kernel + git + explorateur + chat. L'éditeur/dossier sont dynamiques.
     canvas = default_canvas()
     assert isinstance(canvas, CanvasState)
     kinds = {n.kind for n in canvas.nodes}
-    assert kinds == {KERNEL_KIND, FILE_EXPLORER_KIND, "chat"}
+    assert kinds == {KERNEL_KIND, "gitbranch", FILE_EXPLORER_KIND, "chat"}
 
 
 def test_canvas_with_node_roundtrip():
@@ -104,34 +104,132 @@ def test_canvas_roundtrip_preserves_source_id():
     assert CanvasState.model_validate(state.model_dump(mode="json")).nodes[0].source_id == "abc"
 
 
-def test_default_canvas_links_explorer_to_kernel():
+def test_default_canvas_git_topology():
+    # Brique G : kernel -> git -> { chat, explorateur }.
     from mekistudio.backend.nodes import default_canvas
     state = default_canvas()
-    k = next(n for n in state.nodes if n.kind == "kernel")
-    e = next(n for n in state.nodes if n.kind == "fileexplorer")
-    assert k.source_id is None
-    assert e.source_id == k.id
+    by = {n.kind: n for n in state.nodes}
+    assert by["kernel"].source_id is None
+    assert by["gitbranch"].source_id == by["kernel"].id
+    assert by["fileexplorer"].source_id == by["gitbranch"].id
+    assert by["chat"].source_id == by["gitbranch"].id
 
 
 def test_reconcile_source_links_repairs_absent_and_dangling():
     from mekistudio.backend.nodes import default_canvas, reconcile_source_links
     state = default_canvas()
-    k = next(n for n in state.nodes if n.kind == "kernel")
+    g = next(n for n in state.nodes if n.kind == "gitbranch")
     e = next(n for n in state.nodes if n.kind == "fileexplorer")
     e.source_id = None                      # absent
     reconcile_source_links(state)
-    assert e.source_id == k.id
+    assert e.source_id == g.id              # canonique = git (brique G)
     e.source_id = "ghost"                   # dangling
     reconcile_source_links(state)
-    assert e.source_id == k.id
+    assert e.source_id == g.id
     before = e.source_id                     # idempotent
     reconcile_source_links(state)
     assert e.source_id == before
+
+
+def test_reconcile_migration_reparents_chat_and_explorer_to_git():
+    # Canvas legacy : chat & explorateur pendent encore au kernel (mauvais kind).
+    from mekistudio.backend.models import CanvasState
+    from mekistudio.backend.nodes import (
+        build_chat_node,
+        build_file_explorer_node,
+        build_gitbranch_node,
+        build_kernel_node,
+        reconcile_source_links,
+    )
+    k = build_kernel_node()
+    g = build_gitbranch_node()
+    c = build_chat_node()
+    e = build_file_explorer_node()
+    g.source_id = k.id
+    c.source_id = k.id  # legacy
+    e.source_id = k.id  # legacy
+    state = CanvasState(nodes=[k, g, c, e])
+    reconcile_source_links(state)
+    by = {n.kind: n for n in state.nodes}
+    assert by["chat"].source_id == by["gitbranch"].id
+    assert by["fileexplorer"].source_id == by["gitbranch"].id
 
 
 def test_canonical_parent_id():
     from mekistudio.backend.nodes import canonical_parent_id, default_canvas
     state = default_canvas()
     k = next(n for n in state.nodes if n.kind == "kernel")
-    assert canonical_parent_id(state, "fileexplorer") == k.id
+    g = next(n for n in state.nodes if n.kind == "gitbranch")
+    assert canonical_parent_id(state, "fileexplorer") == g.id  # brique G : sous git
+    assert canonical_parent_id(state, "gitbranch") == k.id
     assert canonical_parent_id(state, "kernel") is None
+
+
+# --- brique G : node git, node dossier, parentage path-aware ---
+
+
+def test_build_gitbranch_node_structure():
+    from mekistudio.backend.components import GitBranchComponent
+    from mekistudio.backend.nodes import build_gitbranch_node
+    n = build_gitbranch_node()
+    assert n.kind == "gitbranch"
+    assert n.configurable is False and n.movable is True
+    comp = n.root.children[0].children[1]
+    assert isinstance(comp, GitBranchComponent)
+
+
+def test_build_folder_node_structure():
+    from mekistudio.backend.components import FileTreeComponent, HeaderComponent
+    from mekistudio.backend.nodes import build_folder_node
+    n = build_folder_node(path="docs/superpowers")
+    assert n.kind == "folder" and n.path == "docs/superpowers"
+    assert n.configurable is True
+    header, tree = n.root.children[0].children
+    assert isinstance(header, HeaderComponent) and header.text == "superpowers"  # dernier segment
+    assert isinstance(tree, FileTreeComponent) and tree.root_path == "docs/superpowers"
+
+
+def _editor_on(path: str):
+    from mekistudio.backend.components import EditorComponent, iter_components
+    from mekistudio.backend.nodes import build_file_editor_node
+    ed = build_file_editor_node()
+    comp = next(c for c in iter_components(ed.root) if isinstance(c, EditorComponent))
+    comp.file_path = path
+    return ed
+
+
+def test_node_effective_path():
+    from mekistudio.backend.nodes import build_folder_node, node_effective_path
+    assert node_effective_path(build_folder_node(path="docs")) == "docs"
+    assert node_effective_path(_editor_on("docs/superpowers/x.md")) == "docs/superpowers"
+    assert node_effective_path(_editor_on("top.md")) == ""  # fichier à la racine
+    assert node_effective_path(_editor_on("")) is None       # pas de fichier ouvert
+
+
+def test_reconcile_path_aware_chain_and_idempotent():
+    from mekistudio.backend.models import CanvasState
+    from mekistudio.backend.nodes import (
+        build_file_explorer_node,
+        build_folder_node,
+        reconcile_source_links,
+    )
+    e = build_file_explorer_node()
+    d = build_folder_node(path="docs")
+    s = build_folder_node(path="docs/superpowers")
+    ed = _editor_on("docs/superpowers/x.md")
+    state = CanvasState(nodes=[e, d, s, ed])
+    reconcile_source_links(state)
+    reconcile_source_links(state)  # idempotent
+    assert ed.source_id == s.id          # éditeur sous son dossier direct
+    assert s.source_id == d.id           # dossier sous son ancêtre (préfixe strict)
+    assert d.source_id == e.id           # racine -> explorateur
+
+
+def test_reconcile_editor_without_folder_falls_back_to_explorer():
+    from mekistudio.backend.models import CanvasState
+    from mekistudio.backend.nodes import build_file_explorer_node, reconcile_source_links
+    e = build_file_explorer_node()
+    ed = _editor_on("docs/superpowers/x.md")  # aucun node dossier
+    state = CanvasState(nodes=[e, ed])
+    reconcile_source_links(state)
+    assert ed.source_id == e.id  # plus long préfixe = explorateur ("")

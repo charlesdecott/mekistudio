@@ -53,6 +53,15 @@ class EditorComponent(ComponentBase):
     file_path: str = ""
 
 
+class GitBranchComponent(ComponentBase):
+    """Affiche l'état git du repo (branche / ahead-behind / modifs locales). Point de
+    montage seulement : les données ne sont PAS dans canvas.json — le front les charge
+    via /api/git/branch (l'état git change hors du canvas, comme le filetree via /api/fs).
+    Rafraîchi à la fin de tour du chat (événementiel)."""
+
+    type: Literal["gitbranch"] = "gitbranch"
+
+
 class ChatComponent(ComponentBase):
     """Surface de chat (conversation Claude). Ne porte que l'identité de la
     conversation : les messages ne sont PAS dans canvas.json — ils vivent dans
@@ -81,6 +90,7 @@ Component = Annotated[
         FileTreeComponent,
         EditorComponent,
         ChatComponent,
+        GitBranchComponent,
     ],
     Field(discriminator="type"),
 ]

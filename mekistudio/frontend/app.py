@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from mekistudio.backend.chat.bridge import default_client_factory
 from mekistudio.backend.chat.manager import ChatManager
-from mekistudio.frontend.routes import canvas, chat_ws, fs
+from mekistudio.frontend.routes import canvas, chat_ws, fs, git
 
 
 @asynccontextmanager
@@ -40,5 +40,6 @@ def create_app(repo_root: Path | None = None, *, chat_client_factory=None) -> Fa
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.include_router(canvas.router)
     app.include_router(fs.router)
+    app.include_router(git.router)
     app.include_router(chat_ws.router)
     return app

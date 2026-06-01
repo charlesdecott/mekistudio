@@ -43,6 +43,10 @@ class Node(BaseModel):
     # au TTL, épinglable) ; `expires_at_ms` = échéance (purge au chargement si dépassée). None = permanent.
     ephemeral: bool = False
     expires_at_ms: int | None = None
+    # Brique G : `path` = chemin posix du dossier pour les nodes `folder` (None sinon) ; sert de
+    # source de vérité au parentage par préfixe. `collapsed` = node réduit (barre de titre seule).
+    path: str | None = None
+    collapsed: bool = False
     root: NodeComponent
 
 

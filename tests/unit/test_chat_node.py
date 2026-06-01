@@ -29,15 +29,16 @@ def test_build_chat_node():
     assert chat.type == "chat" and chat.conversation_id
 
 
-def test_chat_in_default_canvas_linked_to_kernel():
+def test_chat_in_default_canvas_linked_to_git():
+    # Brique G : le chat pend désormais à la node git (kernel -> git -> chat).
     state = default_canvas()
     kinds = {n.kind for n in state.nodes}
-    assert {"kernel", "fileexplorer", "chat"} <= kinds
+    assert {"kernel", "gitbranch", "fileexplorer", "chat"} <= kinds
     assert NODE_BUILDERS["chat"]
-    assert CANONICAL_PARENT_KIND["chat"] == "kernel"
-    kernel = next(n for n in state.nodes if n.kind == "kernel")
+    assert CANONICAL_PARENT_KIND["chat"] == "gitbranch"
+    git = next(n for n in state.nodes if n.kind == "gitbranch")
     chat = next(n for n in state.nodes if n.kind == "chat")
-    assert chat.source_id == kernel.id
+    assert chat.source_id == git.id
 
 
 def test_conversation_id_survives_load_reconcile_save(tmp_path):
