@@ -87,6 +87,9 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   complète = union des ancêtres ; compacte = fusion des dossiers à enfant unique, split au branchement).
 - **`static/js/git-node.js`** — rendu **pur** de la node git (`window.MekiGitNode`, testé `node --test`) :
   `fmtTitle`/`fmtDetail` (⎇ branche · ↑ahead ↓behind · ● modifs), `render(el, info)`.
+- **`static/js/tree-layout.js`** — layout d'arbre « tidy » **pur** (`window.MekiTreeLayout`, testé `node --test`) :
+  `layoutTree(items, rootId, opts)` place un sous-arbre en colonnes par profondeur (x→droite),
+  frères empilés, parent centré sur ses enfants (Reingold-Tilford simplifié).
 - **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
   `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
   `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
@@ -112,6 +115,10 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   non destructive (`closeFolderNode`, enfants rebranchés au grand-parent ; shift = cascade).
   **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier).
   **Node git** : `refreshGit` (charge `/api/git/branch` au boot et sur `meki:turn-end`).
+  **Disposition en arbre lisible** : `layoutFolderTree` (via `MekiTreeLayout`) dispose le sous-arbre
+  de l'explorateur (dossiers + éditeurs) en colonnes par profondeur — on suit l'intrication
+  dossier→…→fichier de gauche à droite. Re-disposé à chaque changement de structure et au boot
+  (positions persistées ; garde anti-drag ; glissement animé via transition `left/top`).
 - **`static/js/editor.js`** — module ESM **CodeMirror 6** (depuis esm.sh) : expose
   `window.MekiEditor.mount()` ; coloration par extension, guides d'indentation,
   word-wrap, thème oneDark, Ctrl+S ; fallback si le CDN ne charge pas.

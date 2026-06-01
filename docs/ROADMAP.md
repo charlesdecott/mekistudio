@@ -107,9 +107,12 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     plus-long-préfixe, fonction pure testée). **Masquage dérivé** (un dossier sorti disparaît de l'explorateur
     parent), **cycle de vie compté-référence + épingle** (purge fixpoint des dossiers éphémères vides),
     **placement F3 ancré** sur la node dossier (regroupement, câbles dégagés), fermeture non destructive,
-    **réduire/agrandir** générique (`Node.collapsed`). Modules purs `node --test` (`folders.js`, `git-node.js`,
-    `parenting.py`). Validé pytest + Playwright (chaîne, groupement, 0 câble sous une node, compaction,
-    fermeture, git, réduction). Spec/plan : `docs/superpowers/{specs,plans}/2026-06-01-node-org-refactor-brick-g*`.
+    **réduire/agrandir** générique (`Node.collapsed`). **Disposition en arbre lisible** (`tree-layout.js`,
+    `layoutFolderTree`) : le sous-arbre dossiers→fichiers est rangé en **colonnes par profondeur** (vers la
+    droite, frères empilés, parent centré) — on suit l'intrication jusqu'au fichier, au lieu d'un éparpillement.
+    Modules purs `node --test` (`folders.js`, `git-node.js`, `tree-layout.js`, `parenting.py`). Validé pytest +
+    Playwright (chaîne, groupement, 0 câble sous une node, compaction, fermeture, git, réduction, arbre lisible).
+    Revue adversariale (2 passes) → défauts corrigés. Spec/plan : `docs/superpowers/{specs,plans}/2026-06-01-node-org-refactor-brick-g*`.
   - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
     `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.
