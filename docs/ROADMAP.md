@@ -96,6 +96,20 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     éditables (`ChatComponent.spawn_mode`/`spawn_ttl_min`/`spawn_cap`). Le mode change le spawn
     (éphémère = aperçu+TTL ; plafond = aperçu plafonné sans TTL ; illimité = éditeur permanent). Validé
     pytest + Playwright. **Brique F (hooks → impulsions → matérialisation) complète.**
+  - **Refacto organisation des nodes (brique G)** (livré, 2026-06-01) : nouvelle topologie
+    **`kernel → git → { chat, explorateur }`** (chat **et** explorateur re-parentés ; migration auto au
+    chargement). **Node « branch git »** built-in (`GET /api/git/branch` lecture seule, tolérant) :
+    affiche `⎇ branche · ↑ahead ↓behind · ● modifs`, **rafraîchie à la fin de tour** (événementiel),
+    **réductible** (barre de titre = vue minimale). **Dossiers en nodes** : ouvrir un fichier (double-clic
+    ou auto-spawn F3) matérialise la **chaîne de dossiers** de son chemin (un node par segment, ou
+    **compacte** style VSCode via un toggle dans les réglages de l'explorateur) ; chaque node dossier est un
+    **mini-explorateur** enraciné, **réductible**. Le cœur est le **parentage path-aware** (`source_id` par
+    plus-long-préfixe, fonction pure testée). **Masquage dérivé** (un dossier sorti disparaît de l'explorateur
+    parent), **cycle de vie compté-référence + épingle** (purge fixpoint des dossiers éphémères vides),
+    **placement F3 ancré** sur la node dossier (regroupement, câbles dégagés), fermeture non destructive,
+    **réduire/agrandir** générique (`Node.collapsed`). Modules purs `node --test` (`folders.js`, `git-node.js`,
+    `parenting.py`). Validé pytest + Playwright (chaîne, groupement, 0 câble sous une node, compaction,
+    fermeture, git, réduction). Spec/plan : `docs/superpowers/{specs,plans}/2026-06-01-node-org-refactor-brick-g*`.
   - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
     `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.

@@ -18,25 +18,30 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   `manifest_path`, `canvas_path`).
 - **`models.py`** — `Manifest`, `Viewport`, `Node` (id, kind, x, y, w/h optionnels,
   `movable`/`resizable`/`configurable`, `max_w`/`max_h`, **`source_id`** = parent logique,
-  `root: NodeComponent`), `CanvasState` (schema_version, `nodes: list[Node]`,
-  `edges: list[dict]` **réservé/inutilisé**, viewport). Les **câbles sont dérivés** de
-  `source_id` (arbre kernel→explorer→éditeurs), pas stockés.
+  `ephemeral`/`expires_at_ms` (F3), **`path`** (chemin d'un node dossier, brique G) /
+  **`collapsed`** (node réduit), `root: NodeComponent`), `CanvasState` (schema_version,
+  `nodes: list[Node]`, `edges: list[dict]` **réservé/inutilisé**, viewport). Les **câbles sont
+  dérivés** de `source_id`, pas stockés.
 - **`components/`** — primitives Pydantic en **union discriminée** sur `type` :
   `NodeComponent`, `LayoutComponent`, `HeaderComponent` (niv. 1–4), `FileTreeComponent`
-  (`root_path`, `excludes`), `EditorComponent` (`file_path`). `Component` = l'union ;
-  `iter_components(c)` parcourt l'arbre.
-- **`nodes/`** — fabriques + registre. `kernel.py`, `file_explorer.py`,
-  `file_editor.py` exposent chacun `KIND` + `build_*_node(...)`. `registry.py` :
-  `NODE_BUILDERS` (kind→fabrique), `build_node(kind, **kw)`, `default_canvas()`
-  (built-in = kernel + explorateur **relié au kernel via `source_id`**),
-  `reconcile_constraints(state)` (réimpose `movable/resizable/configurable/max_*` depuis le
-  kind), `CANONICAL_PARENT_KIND`/`canonical_parent_id(state, kind)` (parent attendu par kind),
-  `reconcile_source_links(state)` (repose les liens `source_id` absents/cassés des built-in).
-- **`bootstrap.py`** — `ensure_meki_dir` (crée `.mekistudio/` + manifest + canvas si
-  absents, puis `_ensure_builtin_nodes` rajoute les kinds built-in manquants + rappelle
-  `reconcile_source_links`) ; `load_canvas` (corrupt-safe : `.bak` + `default_canvas()` ;
-  applique `reconcile_constraints` puis `reconcile_source_links`) ;
-  `save_canvas`/`_write_json` (**écriture atomique** tmp unique + `replace`, `allow_nan=False`).
+  (`root_path`, `excludes`, **`compact_chain`** = compaction des dossiers-en-nodes),
+  `EditorComponent` (`file_path`), `ChatComponent` (F3b), **`GitBranchComponent`** (point de
+  montage de l'état git, brique G). `Component` = l'union ; `iter_components(c)` parcourt l'arbre.
+- **`nodes/`** — fabriques + registre. `kernel.py`, `gitbranch.py`, `file_explorer.py`,
+  `file_editor.py`, `chat.py`, `folder.py` exposent chacun `KIND` + `build_*_node(...)`.
+  `registry.py` : `NODE_BUILDERS`, `build_node`, `default_canvas()` (built-in = **kernel → git →
+  { chat, explorateur }**), `reconcile_constraints(state)`. **Parentage des câbles** : par KIND
+  (`CANONICAL_PARENT_KIND`/`canonical_parent_id`) pour kernel/git/chat/explorateur ; **path-aware**
+  (préfixe de chemin) pour `folder`/`fileeditor` via `node_effective_path` + `derive_source_id` +
+  le module **pur** `parenting.py` (`is_prefix`, `longest_prefix_id`). `reconcile_source_links(state)`
+  applique les deux (idempotent, déterministe) et **migre** les built-in de mauvais kind
+  (chat/explorateur encore reliés au kernel → git).
+- **`git.py`** — état git **lecture seule** (brique G) : `branch_info(root)` → `{branch, detached,
+  dirty, ahead, behind}` via subprocess git **non mutant**, `cwd=root`, `timeout`, **tolérant**
+  (hors repo / git absent → `branch=None`, jamais d'exception). `ahead/behind` calculés en LOCAL.
+- **`bootstrap.py`** — `ensure_meki_dir` (+ `_ensure_builtin_nodes` qui rajoute les built-in
+  manquants — dont la node git — puis `reconcile_source_links`) ; `load_canvas` (corrupt-safe ;
+  `reconcile_constraints` puis `reconcile_source_links`) ; `save_canvas`/`_write_json` (atomique).
 - **`fs.py`** — accès fichiers **sandboxé** au repo : `list_dir(root, rel, excludes)`,
   `read_file` (garde binaire/taille `MAX_FILE_BYTES`/UTF-8), `write_file` (fichier
   existant, atomique), `is_file_in_root`.
@@ -49,11 +54,14 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
 | `GET /` | page canvas (Jinja `canvas.html`, bootstrap) |
 | `GET /api/canvas` | `CanvasState` complet |
 | `POST /api/canvas/viewport` | persiste pan/zoom (rejet NaN/Inf) |
-| `POST /api/canvas/nodes` | **crée** un node (kind, x, y ; `source_id` **dérivé serveur** par kind, override optionnel ; borné `MAX_NODES`, rejet non-fini) |
-| `DELETE /api/canvas/nodes/{id}` | **supprime** un node (built-in protégés → 422) |
-| `POST /api/canvas/nodes/{id}` | déplace/redimensionne (contraintes serveur, clamp) |
+| `GET /api/canvas` | `CanvasState` (purge des éphémères TTL expirés **et** des nodes dossier éphémères sans enfant, fixpoint — brique G) |
+| `POST /api/canvas/nodes` | **crée** un node (kind, x, y, `path` pour `folder` ; `source_id` **dérivé serveur** path-aware ou par kind, override optionnel) |
+| `DELETE /api/canvas/nodes/{id}` | **supprime** un node (built-in protégés → 422 ; git inclus) |
+| `POST /api/canvas/nodes/{id}` | déplace/redimensionne + **`collapsed`** (réduire/agrandir) |
 | `POST /api/canvas/nodes/{id}/open` | ouvre un fichier dans un node éditeur |
-| `POST /api/canvas/nodes/{id}/settings` | réglages (ex. `excludes` du fileExplorer) |
+| `POST /api/canvas/nodes/{id}/pin` | épingle un node éphémère (éditeur F3 / dossier) → permanent |
+| `POST /api/canvas/nodes/{id}/settings` | réglages (`excludes`, **`compact_chain`** explorateur ; `spawn_*` chat) |
+| `GET /api/git/branch` | état git lecture seule (brique G) |
 | `GET /api/fs?path=&exclude=` | listing dossier (lazy, sandboxé) |
 | `GET /api/file?path=` · `POST /api/file` | lire / sauver un fichier texte |
 
@@ -74,6 +82,11 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   (`window.MekiCollision`, testée `node --test`) : `intersects`/`isFree`, `partVector`
   (écarte un voisin, 2 côtés), `pushVector` (resize), `clampAgainst` (mur), `findFreeSpot`
   (trou libre en spirale bornée).
+- **`static/js/folders.js`** — géométrie **pure** des dossiers-en-nodes (`window.MekiFolders`, testée
+  `node --test`, brique G) : `dirOf`, `ancestors`, `desiredFolders(openFiles, {compact})` (chaîne
+  complète = union des ancêtres ; compacte = fusion des dossiers à enfant unique, split au branchement).
+- **`static/js/git-node.js`** — rendu **pur** de la node git (`window.MekiGitNode`, testé `node --test`) :
+  `fmtTitle`/`fmtDetail` (⎇ branche · ↑ahead ↓behind · ● modifs), `render(el, info)`.
 - **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
   `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
   `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
@@ -91,6 +104,14 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   `meki:impulse` (dispatché par `chat-view.js`), `applyIntent` résout la cible (éditeur par
   `data-file` via `fileOfComponent`, sinon explorateur/chat par `data-kind`) et anime comète/glow ;
   glow **persistant** (Stop/Notification) éteint au clic (`glowDismissable`).
+  **Dossiers-en-nodes** (brique G) : `_ensureFolderChain`/`reconcileFolderNodes` (matérialisent la
+  chaîne de dossiers d'un fichier ouvert via `MekiFolders`), `_createFolderNode`/`_removeFolderNode`,
+  `editorSpawnPos(anchorWrap)` ancré sur la node dossier (regroupement + câbles dégagés),
+  `_findFolderForPath`/`_nearestFolderAnchor`, **masquage dérivé** (`fs-claimed` : un dossier de
+  l'arbre qui a sa node est masqué), sortie manuelle (clic-droit → `openFolderAsNode`), fermeture
+  non destructive (`closeFolderNode`, enfants rebranchés au grand-parent ; shift = cascade).
+  **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier).
+  **Node git** : `refreshGit` (charge `/api/git/branch` au boot et sur `meki:turn-end`).
 - **`static/js/editor.js`** — module ESM **CodeMirror 6** (depuis esm.sh) : expose
   `window.MekiEditor.mount()` ; coloration par extension, guides d'indentation,
   word-wrap, thème oneDark, Ctrl+S ; fallback si le CDN ne charge pas.
@@ -109,6 +130,10 @@ Dépendances réseau externes (assumées) : Alpine (unpkg), CodeMirror (esm.sh).
 - `backend/` n'importe jamais `frontend/`.
 - **Câbles dérivés** de `source_id` (jamais d'`edges` persistés) ; géométries câbles/collision
   **pures** (testables `node --test`, sans DOM), DOM impératif côté `canvas.js`.
+- **Parentage path-aware** (brique G) : le parent d'un node `folder`/`fileeditor` = le node
+  (explorateur ∪ dossiers) au **plus long préfixe de chemin** ; le reste par kind. `reconcile_source_links`
+  est la source de vérité (idempotent, déterministe) — un node dossier supprimé voit ses enfants
+  rebranchés automatiquement au reload.
 - **Zéro-recouvrement** des nodes maintenu (collision douce au move/resize/spawn + réconciliation
   au boot) ; le `kernel` (`movable:false`) fait office de **mur**.
 
