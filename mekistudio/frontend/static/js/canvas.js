@@ -1313,6 +1313,9 @@ document.addEventListener('alpine:init', () => {
       const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
       const L = window.MekiTreeLayout;
       if (!explorer || !L) { this.drawCables(); return; }
+      // Ne PAS perturber un déplacement en cours : un spawn piloté par le chat peut survenir pendant
+      // un drag ; re-disposer alors arracherait le node tenu et écraserait les voisins poussés.
+      if (this.$root.querySelector('.node-wrap.dragging')) return;
       const exId = explorer.dataset.id;
       const exb = this.boxOf(explorer);
       const wraps = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"], .node-wrap[data-kind="fileeditor"]')];
@@ -1326,7 +1329,14 @@ document.addEventListener('alpine:init', () => {
         sortKey: w.dataset.kind === 'folder' ? '0' + (w.dataset.folder || '') : '1' + (w.dataset.file || ''),
       }));
       // Espacements généreux (l'utilisateur veut de l'air) : colonnes > largeur éditeur, rangées > hauteur éditeur.
-      const pos = L.layoutTree(items, exId, { col: 660, row: 560, rootX: exb.x, rootCy: exb.y + exb.h / 2 });
+      const COL = 660, ROW = 560;
+      // La colonne de profondeur-1 doit DÉGAGER la « colonne vertébrale » fixe (kernel/git/chat) même
+      // si l'explorateur a été déplacé loin à gauche -> sinon une colonne de l'arbre la recouvrirait.
+      let spineRight = exb.x;
+      this.$root.querySelectorAll('.node-wrap[data-kind="kernel"], .node-wrap[data-kind="gitbranch"], .node-wrap[data-kind="chat"]')
+        .forEach((f) => { const fb = this.boxOf(f); spineRight = Math.max(spineRight, fb.x + fb.w); });
+      const rootX = Math.max(exb.x, spineRight + 80 - COL);
+      const pos = L.layoutTree(items, exId, { col: COL, row: ROW, rootX, rootCy: exb.y + exb.h / 2 });
       for (const w of wraps) {
         const p = pos[w.dataset.id];
         if (!p) continue;
@@ -1396,7 +1406,7 @@ document.addEventListener('alpine:init', () => {
       }
       this._refreshFolderClaims();
       this._recableFolders();
-      this.layoutFolderTree();
+      this.drawCables(); // la disposition tidy est faite UNE fois par l'appelant (après l'ajout de l'éditeur)
       return this._findFolderForPath(filePath);
     },
     // Recalcule l'ensemble des nodes dossier désirés (déclaratif) — pour le toggle compact et le ménage.
