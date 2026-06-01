@@ -1305,16 +1305,16 @@ document.addEventListener('alpine:init', () => {
         it.classList.toggle('fs-claimed', this._hasFolderNode(it.dataset.path));
       });
     },
-    // Dispose le sous-arbre de l'explorateur (dossiers + éditeurs) en ARBRE LISIBLE : colonnes par
-    // profondeur vers la droite, frères empilés, parent centré (MekiTreeLayout pur). On suit ainsi
-    // l'intrication dossier→…→fichier de gauche à droite, au lieu d'un éparpillement aléatoire.
-    // Ne touche QUE les nodes dossier/éditeur ; le kernel/git/chat/explorateur restent en place.
+    // Dispose le sous-arbre de l'explorateur (dossiers + éditeurs) de façon ORGANIQUE « neurones » :
+    // explorateur au centre, chaque dossier part dans une direction et tourne à chaque niveau
+    // (dendrites), frères éclatés, sans recouvrement (MekiNeuroLayout pur, déterministe). On évite la
+    // « colonne vertébrale » (kernel/git/chat à gauche) via un arc biaisé à droite + obstacles fixes.
+    // Ne touche QUE les nodes dossier/éditeur. Puis auto-fit du viewport (tout voir).
     layoutFolderTree() {
       const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
-      const L = window.MekiTreeLayout;
+      const L = window.MekiNeuroLayout;
       if (!explorer || !L) { this.drawCables(); return; }
-      // Ne PAS perturber un déplacement en cours : un spawn piloté par le chat peut survenir pendant
-      // un drag ; re-disposer alors arracherait le node tenu et écraserait les voisins poussés.
+      // Ne PAS perturber un déplacement en cours (un spawn chat peut tomber pendant un drag).
       if (this.$root.querySelector('.node-wrap.dragging')) return;
       const exId = explorer.dataset.id;
       const exb = this.boxOf(explorer);
@@ -1325,18 +1325,19 @@ document.addEventListener('alpine:init', () => {
         parent: w.dataset.source || '',
         w: w.offsetWidth,
         h: w.offsetHeight,
-        // dossiers (préfixe '0') avant fichiers ('1'), puis tri par chemin/nom : ordre stable et lisible.
         sortKey: w.dataset.kind === 'folder' ? '0' + (w.dataset.folder || '') : '1' + (w.dataset.file || ''),
       }));
-      // Espacements généreux (l'utilisateur veut de l'air) : colonnes > largeur éditeur, rangées > hauteur éditeur.
-      const COL = 660, ROW = 560;
-      // La colonne de profondeur-1 doit DÉGAGER la « colonne vertébrale » fixe (kernel/git/chat) même
-      // si l'explorateur a été déplacé loin à gauche -> sinon une colonne de l'arbre la recouvrirait.
-      let spineRight = exb.x;
+      // colonne vertébrale figée (kernel/git/chat) = obstacles ; le câble explorateur→git sort à gauche.
+      const obstacles = [];
       this.$root.querySelectorAll('.node-wrap[data-kind="kernel"], .node-wrap[data-kind="gitbranch"], .node-wrap[data-kind="chat"]')
-        .forEach((f) => { const fb = this.boxOf(f); spineRight = Math.max(spineRight, fb.x + fb.w); });
-      const rootX = Math.max(exb.x, spineRight + 80 - COL);
-      const pos = L.layoutTree(items, exId, { col: COL, row: ROW, rootX, rootCy: exb.y + exb.h / 2 });
+        .forEach((f) => obstacles.push(this.boxOf(f)));
+      const pos = L.layout(items, exId, {
+        rootX: exb.x + exb.w / 2, rootY: exb.y + exb.h / 2, rootW: exb.w, rootH: exb.h,
+        chaos: 0.25, length: 180, spread: 1.0,        // réglages validés (companion)
+        arcStart: -0.58 * Math.PI, arcSpan: 1.16 * Math.PI, // éventail à droite (la colonne kernel/git/chat est à gauche)
+        gap: 58,   // écart mini généreux : laisse des couloirs au routeur de câbles (subway évite les nodes)
+        obstacles,
+      });
       for (const w of wraps) {
         const p = pos[w.dataset.id];
         if (!p) continue;
@@ -1346,10 +1347,33 @@ document.addEventListener('alpine:init', () => {
           this.clearTranslate(w);
           w.style.left = nx + 'px';
           w.style.top = ny + 'px';
-          this._persistPos(w.dataset.id, nx, ny); // garde la disposition au reload
+          this._persistPos(w.dataset.id, nx, ny);
         }
       }
       this.drawCables();
+      this.fitView(); // tout le « cerveau » à l'écran (zoom seulement si ça déborde)
+    },
+
+    // Ajuste le viewport pour que TOUS les nodes tiennent à l'écran (auto-zoom). Ne dérange la vue
+    // que si quelque chose déborde (sinon on respecte le pan/zoom courant). `force` recadre toujours.
+    fitView(force) {
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')];
+      if (!wraps.length) return;
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const w of wraps) { const b = this.boxOf(w); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+      const pad = 90, W = window.innerWidth, H = window.innerHeight;
+      if (!force) { // déjà tout visible ? -> ne pas bouger
+        const sx0 = (x0 - pad) * this.view.zoom + this.view.x, sy0 = (y0 - pad) * this.view.zoom + this.view.y;
+        const sx1 = (x1 + pad) * this.view.zoom + this.view.x, sy1 = (y1 + pad) * this.view.zoom + this.view.y;
+        if (sx0 >= 0 && sy0 >= 0 && sx1 <= W && sy1 <= H) return;
+      }
+      const bw = (x1 - x0) + 2 * pad, bh = (y1 - y0) + 2 * pad;
+      const zoom = Math.max(0.2, Math.min(W / bw, H / bh, 1.1)); // borné comme le zoom molette
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      this.view.zoom = zoom;
+      this.view.x = W / 2 - cx * zoom;
+      this.view.y = H / 2 - cy * zoom;
+      this.scheduleSave();
     },
 
     // Re-câble (DOM) les nodes dossier + éditeurs par plus-long-préfixe — MIROIR du reconcile
