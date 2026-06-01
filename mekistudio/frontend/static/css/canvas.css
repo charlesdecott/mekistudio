@@ -331,3 +331,41 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .chat-tool.err .chat-tool-head .st, .chat-tool.err .chat-tool-head .arg { color: #e5484d; }
 .chat-tool .out { display: none; white-space: pre-wrap; color: #9fb3c8; margin: 2px 0 6px 18px; max-height: 220px; overflow: auto; }
 .chat-tool.open .out { display: block; }
+
+/* ===== Brique G : node git, dossiers-en-nodes, réduire/agrandir ===== */
+
+/* node « branch git » : titre (⎇ branche) + détail (ahead/behind/modifs). */
+.cmp-gitbranch { display: flex; flex-direction: column; gap: 4px; color: #dbe2ee; font-family: Consolas, "JetBrains Mono", monospace; }
+.cmp-gitbranch .gb-title { font-weight: 700; font-size: 14px; color: #e6e6e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmp-gitbranch .gb-detail { font-size: 12px; color: #9fb3c8; }
+
+/* réduire / agrandir : barre de titre seule (corps masqué, hauteur auto). */
+.node-wrap.collapsed { height: auto !important; }
+.node-wrap.collapsed .gb-detail,
+.node-wrap.collapsed .cmp-filetree { display: none !important; }
+.node-collapse {
+  position: absolute; top: -12px; left: -12px; z-index: 6;
+  width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  background: #2d3a55; color: #eaf0ff; border: 1px solid #4d8dff;
+  cursor: pointer; font-size: 11px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .45);
+}
+.node-collapse:hover { background: #3a4a6b; }
+
+/* node dossier : croix de fermeture (coin haut-droit), visible si sélectionné. */
+.node-close-folder {
+  position: absolute; top: -12px; right: -12px; z-index: 6;
+  display: none; width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  background: #2a3242; color: #9aa4b2; border: 1px solid #2c3650;
+  cursor: pointer; font-size: 11px; line-height: 1;
+  align-items: center; justify-content: center;
+}
+.node-wrap.selected .node-close-folder { display: flex; }
+.node-close-folder:hover { background: #5a2d34; color: #f0c0c0; }
+
+/* masquage dérivé : un dossier de l'arbre qui possède déjà sa node est masqué. */
+.fs-item.fs-claimed { display: none; }
+
+/* node dossier : accent visuel (mini-explorateur enraciné). */
+.node-wrap[data-kind="folder"] .cmp-node { border-color: #2f5a3f; }

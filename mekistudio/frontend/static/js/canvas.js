@@ -19,7 +19,10 @@ document.addEventListener('alpine:init', () => {
     settingsMode: 'ephemeral',
     settingsTtl: 10,
     settingsCap: 20,
+    settingsCompact: false,  // brique G : toggle de compaction des dossiers (explorateur)
     _settingsTree: null,
+    _compactMode: false,     // brique G : chaîne de dossiers compacte (lu des réglages explorateur)
+    _creatingFolders: {},    // path -> true pendant la création d'un node dossier (anti-doublon)
     _editors: {},            // états des nodes éditeur, indexés par node id
     _chatViews: {},          // handles des vues chat (WS), indexés par node id
     _zTop: 0,                // dernier z-index attribué (premier plan au clic)
@@ -54,12 +57,16 @@ document.addEventListener('alpine:init', () => {
       const nodes = state.nodes || [];
       this.renderNodes(nodes);
       this._readSpawnSettings(nodes); // F3b : applique les réglages d'auto-spawn du chat
+      this._readCompactMode(nodes);   // brique G : lit le toggle de compaction de l'explorateur
       this.reconcileOverlaps();   // sépare les nodes hérités qui se chevauchent (zéro recouvrement)
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
       this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
+      this.refreshGit(); // brique G : charge l'état git de la node « branch git »
       // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
       document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
+      // Brique G : la node git se rafraîchit à la fin de tour du chat (événementiel).
+      document.addEventListener('meki:turn-end', () => this.refreshGit());
     },
     // Passe ordonnée déterministe : figés d'abord (murs), puis mobiles triés par id ;
     // chaque node placé devient obstacle pour les suivants. Persiste les déplacés.
@@ -103,10 +110,18 @@ document.addEventListener('alpine:init', () => {
       wrap.dataset.source = node.source_id || ''; // graphe de câbles lu depuis le DOM
       // file_path n'est PAS à root.file_path : il est imbriqué dans l'arbre (composant type 'editor').
       if (node.kind === 'fileeditor') wrap.dataset.file = this.fileOfComponent(node.root);
+      // Brique G : un node dossier porte son chemin (lookup DOM par dossier + masquage dérivé).
+      if (node.kind === 'folder') wrap.dataset.folder = node.path || '';
       if (node.ephemeral) this._markEphemeral(wrap, node); // aperçu auto-spawné (F3a) : style + TTL + clic=épingle
       this.applyBox(wrap, node);
       wrap.appendChild(this.renderComponent(node.root, node));
+      // Brique G : capacité réduire/agrandir (git + dossier) — barre de titre seule quand réduit.
+      if (this._isCollapsible(node)) {
+        wrap.classList.toggle('collapsed', !!node.collapsed);
+        wrap.appendChild(this.makeCollapseToggle(node));
+      }
       if (node.configurable) wrap.appendChild(this.makeGear(node));
+      if (node.kind === 'folder') wrap.appendChild(this.makeFolderClose(node)); // dossier supprimable
       wrap.addEventListener('mousedown', (e) => this.onNodeMouseDown(e, node, wrap));
       return wrap;
     },
@@ -627,7 +642,10 @@ document.addEventListener('alpine:init', () => {
       this._spawning[path] = true;
       this._inFlightSpawns += 1;                            // compte le spawn EN VOL (pas encore dans le DOM) pour le plafond
       this._enforceSpawnCap();
-      const pos = this.editorSpawnPos();
+      // Brique G : matérialise la chaîne de dossiers du fichier, puis ancre l'éditeur sur SA node dossier.
+      const folderWrap = await this._ensureFolderChain(path);
+      const folderId = folderWrap ? folderWrap.dataset.id : undefined;
+      const pos = this.editorSpawnPos(folderWrap);
       try {
         let node;
         try {
@@ -635,7 +653,7 @@ document.addEventListener('alpine:init', () => {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             // F3b : mode 'ephemeral' = aperçu + TTL ; 'capped' = aperçu sans TTL (plafond FIFO) ;
             // 'unlimited' = éditeur permanent (non éphémère, pas de plafond).
-            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, ephemeral: this._spawnMode !== 'unlimited', expires_at_ms: this._spawnMode === 'ephemeral' ? Date.now() + this._spawnTtlMs : null }),
+            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, source_id: folderId, ephemeral: this._spawnMode !== 'unlimited', expires_at_ms: this._spawnMode === 'ephemeral' ? Date.now() + this._spawnTtlMs : null }),
           });
           if (!r.ok) return;
           node = await r.json();
@@ -713,7 +731,7 @@ document.addEventListener('alpine:init', () => {
       if (!wrap || !wrap.classList.contains('ephemeral')) return; // épinglé entre-temps -> ne pas supprimer
       try { await fetch('/api/canvas/nodes/' + id, { method: 'DELETE' }); } catch (e) {}
       const w = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
-      if (w) { w.remove(); this.drawCables(); }
+      if (w) { w.remove(); this.drawCables(); this.reconcileFolderNodes(); } // brique G : purge dossier vide
     },
 
     // Plafond : si trop d'auto-spawnés VIVANTS (DOM) + EN VOL, ferme le(s) plus ancien(s) (ordre DOM).
@@ -890,6 +908,7 @@ document.addEventListener('alpine:init', () => {
         const ft = this.findFileTree(node.root);
         this._settingsTree = ft;
         this.settingsExcludes = ft ? [...(ft.excludes || [])] : [];
+        this.settingsCompact = !!(ft && ft.compact_chain); // brique G : toggle de compaction (explorateur)
         this.newExclude = '';
       }
       this.settingsOpen = true;
@@ -912,9 +931,12 @@ document.addEventListener('alpine:init', () => {
       if (!node) return;
       this.settingsError = '';
       const isChat = this.settingsKind === 'chat';
+      const isExplorer = this.settingsKind === 'fileexplorer';
       const body = isChat
         ? { spawn_mode: this.settingsMode, spawn_ttl_min: Number(this.settingsTtl), spawn_cap: Number(this.settingsCap) }
-        : { excludes: this.settingsExcludes };
+        : (isExplorer
+            ? { excludes: this.settingsExcludes, compact_chain: this.settingsCompact } // brique G : compaction
+            : { excludes: this.settingsExcludes });
       try {
         const r = await fetch('/api/canvas/nodes/' + node.id + '/settings', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -933,10 +955,15 @@ document.addEventListener('alpine:init', () => {
         this.settingsOpen = false;
         return;
       }
-      if (this._settingsTree) this._settingsTree.excludes = [...this.settingsExcludes];
+      if (this._settingsTree) {
+        this._settingsTree.excludes = [...this.settingsExcludes];
+        if (isExplorer) this._settingsTree.compact_chain = this.settingsCompact; // brique G
+      }
+      if (isExplorer) this._compactMode = this.settingsCompact;
       this.settingsOpen = false;
       // Re-rend UNIQUEMENT le node configuré (filetree avec les nouvelles exclusions).
       this.rerenderNode(node);
+      if (isExplorer) { this._refreshFolderClaims(); this.reconcileFolderNodes(); } // applique la (dé)compaction
     },
     // Re-rend un seul node en place : évite de re-monter l'EditorView (fuite)
     // et d'écraser une édition non sauvegardée lors d'un changement de réglages.
@@ -1061,20 +1088,23 @@ document.addEventListener('alpine:init', () => {
       if (wrap) wrap.remove();
       if (this.selectedId === state.nodeId) { this.hideToolbar(); this.selectedId = null; }
       this.drawCables(); // le câble disparaît avec le node source retiré
+      this.reconcileFolderNodes(); // brique G : purge les dossiers devenus vides
     },
     // Double-clic sur un fichier -> spawn un NOUVEAU node éditeur près de
     // l'explorateur (en cascade), ouvre le fichier dedans, le rend.
     async openFileInNewEditor(path) {
-      // place le nouvel éditeur dans le 1er TROU LIBRE près de l'explorateur (réservé
-      // synchroniquement pour que 2 double-clics rapprochés ne visent pas le même trou).
-      const pos = this.editorSpawnPos();
+      // Brique G : garantit la chaîne de dossiers du fichier, puis place l'éditeur près de
+      // SA node dossier (regroupement par dossier) ; câble dégagé via editorSpawnPos(ancre).
+      const folderWrap = await this._ensureFolderChain(path);
+      const pos = this.editorSpawnPos(folderWrap);
+      const folderId = folderWrap ? folderWrap.dataset.id : undefined;
       try {
         let node;
         try {
           const r = await fetch('/api/canvas/nodes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y }),
+            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, source_id: folderId }),
           });
           if (!r.ok) return;
           node = await r.json();
@@ -1105,17 +1135,17 @@ document.addEventListener('alpine:init', () => {
     // choisi pour que son câble vers l'explorateur soit DÉGAGÉ (ne passe pas sous un autre node).
     // On tire des candidats sur un anneau aléatoire autour de l'explorateur ; on garde le 1er qui est
     // libre ET dont le segment candidat→explorateur ne traverse aucun autre node. Repli : 1er libre.
-    editorSpawnPos() {
+    editorSpawnPos(anchorWrap = null, size = { w: 520, h: 440 }) {
       const C = window.MekiCollision, K = window.MekiCables;
-      const ex = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      // Brique G : ancre = la node dossier du fichier si fournie, sinon l'explorateur (compat).
+      const ex = anchorWrap || this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
       let exb = { x: 360, y: 0, w: 300, h: 200 };
       if (ex) exb = this.boxOf(ex);
       const exC = { x: exb.x + exb.w / 2, y: exb.y + exb.h / 2 };
-      const size = { w: 520, h: 440 }; // EDITOR_SPAWN_SIZE — refléter file_editor.py
       const all = [], cableObs = [], occupied = []; // all = anti-chevauchement ; cableObs = test câble ; occupied = angles pris
       this.$root.querySelectorAll('.node-wrap').forEach((w) => {
         const box = this.boxOf(w); all.push(box);
-        if (w.dataset.kind === 'fileexplorer') return;
+        if (w === ex) return; // l'ancre (explorateur OU dossier) est exclue du test de câble
         cableObs.push(box);
         occupied.push(Math.atan2((box.y + box.h / 2) - exC.y, (box.x + box.w / 2) - exC.x));
       });
@@ -1151,6 +1181,196 @@ document.addEventListener('alpine:init', () => {
       this._pendingSpots.push({ x: spot.x, y: spot.y, w: size.w, h: size.h });
       return spot;
     },
+    // ===== Brique G : node git, dossiers-en-nodes, réduire/agrandir =====
+
+    // Charge l'état git du repo et l'applique à toutes les nodes « branch git » du canvas.
+    async refreshGit() {
+      const els = this.$root.querySelectorAll('.cmp-gitbranch');
+      if (!els.length || !window.MekiGitNode) return;
+      let info = null;
+      try { const r = await fetch('/api/git/branch'); if (r.ok) info = await r.json(); } catch (e) { /* best-effort */ }
+      els.forEach((el) => window.MekiGitNode.render(el, info));
+    },
+    _readCompactMode(nodes) {
+      const ex = (nodes || []).find((n) => n.kind === 'fileexplorer');
+      const tree = ex && this.findFileTree(ex.root);
+      this._compactMode = !!(tree && tree.compact_chain);
+    },
+
+    // --- réduire / agrandir (générique : git + dossier) ---
+    _isCollapsible(node) { return node.kind === 'folder' || node.kind === 'gitbranch'; },
+    makeCollapseToggle(node) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'node-collapse';
+      btn.title = node.collapsed ? 'Agrandir' : 'Réduire';
+      btn.textContent = node.collapsed ? '▸' : '▾';
+      btn.addEventListener('mousedown', (e) => e.stopPropagation());
+      btn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleCollapse(node, btn.closest('.node-wrap'), btn); });
+      return btn;
+    },
+    async toggleCollapse(node, wrap, btn) {
+      const next = !node.collapsed;
+      node.collapsed = next;
+      if (wrap) wrap.classList.toggle('collapsed', next);
+      if (btn) { btn.textContent = next ? '▸' : '▾'; btn.title = next ? 'Agrandir' : 'Réduire'; }
+      this.drawCables(); // la hauteur change (barre de titre seule) -> les câbles suivent
+      try {
+        await fetch('/api/canvas/nodes/' + node.id, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collapsed: next }),
+        });
+      } catch (e) { /* best-effort */ }
+    },
+
+    // --- node dossier : helpers de chemin ---
+    _hasFolderNode(path) {
+      if (!path) return false;
+      return !!this.$root.querySelector('.node-wrap[data-kind="folder"][data-folder="' + path + '"]');
+    },
+    _isSegPrefix(prefix, path) {
+      if (prefix === '') return true;
+      return path === prefix || path.startsWith(prefix + '/');
+    },
+    openEditorFilePaths() {
+      return [...this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]')]
+        .map((w) => w.dataset.file).filter(Boolean);
+    },
+    // Node dossier hôte d'un fichier = celui dont data-folder == dossier du fichier (s'il existe).
+    _findFolderForPath(filePath) {
+      const dir = window.MekiFolders.dirOf(filePath);
+      if (!dir) return null;
+      return this.$root.querySelector('.node-wrap[data-kind="folder"][data-folder="' + dir + '"]');
+    },
+    // Ancre de placement = node dossier ancêtre la plus proche (plus long préfixe), sinon explorateur.
+    _nearestFolderAnchor(path) {
+      let best = null, bestLen = -1;
+      this.$root.querySelectorAll('.node-wrap[data-kind="folder"]').forEach((w) => {
+        const f = w.dataset.folder || '';
+        if (f === path) return; // pas soi-même
+        if (this._isSegPrefix(f, path)) {
+          const n = f === '' ? 0 : f.split('/').length;
+          if (n > bestLen) { best = w; bestLen = n; }
+        }
+      });
+      return best || this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+    },
+
+    // --- création / suppression de nodes dossier ---
+    async _createFolderNode(path, { pinned = false } = {}) {
+      if (!path || this._hasFolderNode(path) || this._creatingFolders[path]) return null;
+      this._creatingFolders[path] = true;
+      const anchor = this._nearestFolderAnchor(path);
+      const pos = this.editorSpawnPos(anchor, { w: 300, h: 320 });
+      try {
+        const r = await fetch('/api/canvas/nodes', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          // auto = éphémère (purge si vide) ; sortie à la main = épinglé (permanent).
+          body: JSON.stringify({ kind: 'folder', x: pos.x, y: pos.y, path, ephemeral: !pinned }),
+        });
+        if (!r.ok) return null;
+        const node = await r.json();
+        const world = this.$root.querySelector('.world');
+        if (world) world.appendChild(this.renderNode(node));
+        return node;
+      } catch (e) { return null; }
+      finally {
+        delete this._creatingFolders[path];
+        this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
+      }
+    },
+    async _removeFolderNode(wrap) {
+      if (!wrap) return;
+      // rebranche les enfants directs au grand-parent (non destructif ; le path-aware confirme au reload)
+      const gp = wrap.dataset.source || '';
+      this.$root.querySelectorAll('.node-wrap[data-source="' + wrap.dataset.id + '"]')
+        .forEach((c) => { c.dataset.source = gp; });
+      try { await fetch('/api/canvas/nodes/' + wrap.dataset.id, { method: 'DELETE' }); } catch (e) {}
+      wrap.remove();
+    },
+    // Masquage dérivé : un dossier de l'arbre qui possède sa propre node est masqué (classe fs-claimed).
+    _refreshFolderClaims() {
+      this.$root.querySelectorAll('.fs-item[data-path]').forEach((it) => {
+        it.classList.toggle('fs-claimed', this._hasFolderNode(it.dataset.path));
+      });
+    },
+
+    // Garantit la chaîne de dossiers nécessaire pour `filePath` (création incrémentale).
+    // En compact, peut SCINDER : retire les dossiers éphémères que la nouvelle config ne désire plus.
+    // Retourne la node dossier hôte du fichier (ou null si à la racine).
+    async _ensureFolderChain(filePath) {
+      const dir = window.MekiFolders.dirOf(filePath);
+      if (!dir) return null;
+      const openFiles = this.openEditorFilePaths().concat([filePath]);
+      const desired = window.MekiFolders.desiredFolders(openFiles, { compact: this._compactMode });
+      const toCreate = desired.filter((p) => !this._hasFolderNode(p))
+        .sort((a, b) => a.split('/').length - b.split('/').length);
+      for (const p of toCreate) await this._createFolderNode(p);
+      if (this._compactMode) {
+        const want = new Set(desired);
+        const stale = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"].ephemeral')]
+          .filter((w) => !want.has(w.dataset.folder));
+        for (const w of stale) await this._removeFolderNode(w);
+      }
+      this._refreshFolderClaims();
+      this.drawCables();
+      return this._findFolderForPath(filePath);
+    },
+    // Recalcule l'ensemble des nodes dossier désirés (déclaratif) — pour le toggle compact et le ménage.
+    async reconcileFolderNodes() {
+      const openFiles = this.openEditorFilePaths();
+      const desired = new Set(window.MekiFolders.desiredFolders(openFiles, { compact: this._compactMode }));
+      // garder les dossiers ÉPINGLÉS (sortis à la main) même hors de l'ensemble désiré
+      this.$root.querySelectorAll('.node-wrap[data-kind="folder"]').forEach((w) => {
+        if (!w.classList.contains('ephemeral')) desired.add(w.dataset.folder);
+      });
+      const toCreate = [...desired].filter((p) => p && !this._hasFolderNode(p))
+        .sort((a, b) => a.split('/').length - b.split('/').length);
+      for (const p of toCreate) await this._createFolderNode(p);
+      const toRemove = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"].ephemeral')]
+        .filter((w) => !desired.has(w.dataset.folder));
+      for (const w of toRemove) await this._removeFolderNode(w);
+      this._refreshFolderClaims();
+      this.drawCables();
+    },
+
+    // Sortie MANUELLE d'un dossier (clic-droit) -> node dossier ÉPINGLÉE (permanente).
+    async openFolderAsNode(path) {
+      if (!path || this._hasFolderNode(path)) return;
+      await this._createFolderNode(path, { pinned: true });
+      this._refreshFolderClaims();
+      this.drawCables();
+    },
+
+    // Fermeture explicite d'un node dossier (croix). cascade (shift) = ferme aussi les enfants.
+    makeFolderClose(node) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'node-close-folder';
+      btn.title = 'Fermer le dossier (shift = ferme aussi les fichiers)';
+      btn.textContent = '✕';
+      btn.addEventListener('mousedown', (e) => e.stopPropagation());
+      btn.addEventListener('click', (e) => { e.stopPropagation(); this.closeFolderNode(node, btn.closest('.node-wrap'), e.shiftKey); });
+      return btn;
+    },
+    async closeFolderNode(node, wrap, cascade) {
+      if (!wrap) return;
+      const children = [...this.$root.querySelectorAll('.node-wrap[data-source="' + wrap.dataset.id + '"]')];
+      if (cascade) {
+        const editors = children.filter((c) => c.dataset.kind === 'fileeditor');
+        if (editors.length && !window.confirm('Fermer le dossier et ses ' + children.length + ' enfant(s) ?')) return;
+        for (const c of children) {
+          if (c.dataset.kind === 'folder') { await this.closeFolderNode({ id: c.dataset.id, kind: 'folder' }, c, true); }
+          else { try { await fetch('/api/canvas/nodes/' + c.dataset.id, { method: 'DELETE' }); } catch (e) {} this._forgetEphemeral(c.dataset.id); c.remove(); }
+        }
+        try { await fetch('/api/canvas/nodes/' + wrap.dataset.id, { method: 'DELETE' }); } catch (e) {}
+        wrap.remove();
+      } else {
+        await this._removeFolderNode(wrap); // non destructif : enfants rebranchés au grand-parent
+      }
+      this._refreshFolderClaims();
+      this.drawCables();
+    },
+
     renderComponent(c, node) {
       if (!c || !c.type) return document.createComment('vide');
       if (c.type === 'header') {
@@ -1196,6 +1416,19 @@ document.addEventListener('alpine:init', () => {
         const el = document.createElement('div');
         el.className = 'cmp-chat-host';
         this.mountChat(el, c, node);
+        return el;
+      }
+      if (c.type === 'gitbranch') {
+        // brique G : titre (⎇ branche, vue minimale gardée quand réduit) + détail (ahead/behind/modifs).
+        const el = document.createElement('div');
+        el.className = 'cmp-gitbranch';
+        const title = document.createElement('div');
+        title.className = 'gb-title';
+        title.textContent = '⎇ …';
+        const detail = document.createElement('div');
+        detail.className = 'gb-detail';
+        detail.textContent = '…';
+        el.append(title, detail);
         return el;
       }
       // type inconnu : fallback visuel plutôt qu'un trou silencieux
@@ -1267,6 +1500,10 @@ document.addEventListener('alpine:init', () => {
       item.appendChild(row);
 
       if (entry.kind === 'dir') {
+        // Brique G : masquage dérivé — un dossier qui possède déjà sa node est masqué ici (fs-claimed) ;
+        // data-path permet de le re-révéler quand la node dossier est fermée.
+        item.dataset.path = entry.path;
+        if (this._hasFolderNode(entry.path)) item.classList.add('fs-claimed');
         const children = document.createElement('div');
         children.className = 'fs-list';
         children.hidden = true;
@@ -1283,6 +1520,13 @@ document.addEventListener('alpine:init', () => {
           if (opening && !loaded) {
             loaded = await this.fsExpand(children, entry.path, depth + 1, excludes);
           }
+        });
+        // Brique G : clic-droit sur un dossier -> le SORTIR en node (mini-explorateur épinglé).
+        row.addEventListener('contextmenu', (ev) => {
+          if (this.tool !== 'select') return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.openFolderAsNode(entry.path);
         });
       } else {
         // simple clic = sélection seule ; double-clic = ouvrir dans l'éditeur (VSCode-like)

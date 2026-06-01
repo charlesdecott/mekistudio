@@ -43,6 +43,9 @@ class FileTreeComponent(ComponentBase):
     type: Literal["filetree"] = "filetree"
     root_path: str = ""  # racine relative au repo (posix) ; "" = racine du repo
     excludes: list[str] = Field(default_factory=lambda: ["__pycache__"])
+    # Brique G : sur l'explorateur principal, bascule la matérialisation des dossiers-en-nodes en
+    # mode COMPACT (fusion des dossiers à enfant unique, style VSCode) au lieu de la chaîne complète.
+    compact_chain: bool = False
 
 
 class EditorComponent(ComponentBase):

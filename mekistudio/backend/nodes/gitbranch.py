@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from mekistudio.backend.components import (
     GitBranchComponent,
-    HeaderComponent,
     LayoutComponent,
     NodeComponent,
 )
@@ -17,22 +16,17 @@ KIND = "gitbranch"
 
 
 def build_gitbranch_node(x: float = 0.0, y: float = 240.0) -> Node:
-    """Sous le kernel (0,0) ; boîte compacte. Non configurable ; réductible (collapsed)."""
+    """Sous le kernel (0,0) ; boîte compacte. Non configurable ; réductible (collapsed).
+    Le GitBranchComponent porte lui-même sa ligne de titre (⎇ branche, vue minimale
+    gardée quand le node est réduit) + le détail (ahead/behind/modifs)."""
     return Node(
         kind=KIND,
         x=x,
         y=y,
         w=240.0,
-        h=120.0,
+        h=96.0,
         configurable=False,
         root=NodeComponent(
-            children=[
-                LayoutComponent(
-                    children=[
-                        HeaderComponent(level=2, text="⎇"),
-                        GitBranchComponent(),
-                    ],
-                )
-            ],
+            children=[LayoutComponent(children=[GitBranchComponent()])],
         ),
     )

@@ -11,6 +11,9 @@
   <!-- géométries pures (window.MekiCables / MekiCollision) — avant canvas.js qui les utilise. -->
   <script defer src="/static/js/cables.js"></script>
   <script defer src="/static/js/collision.js"></script>
+  <!-- brique G : dossiers-en-nodes (MekiFolders) + rendu node git (MekiGitNode), purs — avant canvas.js. -->
+  <script defer src="/static/js/folders.js"></script>
+  <script defer src="/static/js/git-node.js"></script>
   <!-- mapping pur hook/event -> intention d'impulsion (window.MekiImpulses) — avant chat-view/canvas. -->
   <script defer src="/static/js/chat-impulses.js"></script>
   <!-- chat : markdown assaini + réducteur pur + vue, AVANT canvas.js et AVANT Alpine.
@@ -91,6 +94,12 @@
           </template>
           <template x-if="settingsKind !== 'chat'">
             <div>
+              <template x-if="settingsKind === 'fileexplorer'">
+                <label class="modal-row compact-row">
+                  <input type="checkbox" x-model="settingsCompact">
+                  Compacter les dossiers (style VSCode : fusionne les dossiers à enfant unique)
+                </label>
+              </template>
               <p class="modal-label">Fichiers / dossiers exclus</p>
               <ul class="exclude-list">
                 <template x-for="(ex, i) in settingsExcludes" :key="i">

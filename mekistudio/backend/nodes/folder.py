@@ -29,7 +29,7 @@ def build_folder_node(x: float = 0.0, y: float = 0.0, path: str = "") -> Node:
         y=y,
         w=300.0,
         h=320.0,
-        configurable=True,
+        configurable=False,  # coins simples : réduire (gauche) + fermer (droite), pas d'engrenage
         path=path,
         root=NodeComponent(
             children=[

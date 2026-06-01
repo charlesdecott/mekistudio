@@ -174,7 +174,7 @@ def test_build_gitbranch_node_structure():
     n = build_gitbranch_node()
     assert n.kind == "gitbranch"
     assert n.configurable is False and n.movable is True
-    comp = n.root.children[0].children[1]
+    comp = n.root.children[0].children[0]
     assert isinstance(comp, GitBranchComponent)
 
 
@@ -183,7 +183,7 @@ def test_build_folder_node_structure():
     from mekistudio.backend.nodes import build_folder_node
     n = build_folder_node(path="docs/superpowers")
     assert n.kind == "folder" and n.path == "docs/superpowers"
-    assert n.configurable is True
+    assert n.configurable is False
     header, tree = n.root.children[0].children
     assert isinstance(header, HeaderComponent) and header.text == "superpowers"  # dernier segment
     assert isinstance(tree, FileTreeComponent) and tree.root_path == "docs/superpowers"

@@ -65,6 +65,7 @@ class NodeSettings(BaseModel):
     spawn_mode: Literal["ephemeral", "capped", "unlimited"] | None = None
     spawn_ttl_min: int | None = Field(default=None, ge=1, le=1440)
     spawn_cap: int | None = Field(default=None, ge=1, le=200)
+    compact_chain: bool | None = None  # brique G : compaction des dossiers-en-nodes (explorateur)
 
 
 class NodeOpen(BaseModel):
@@ -327,6 +328,15 @@ async def update_node_settings(
                     if name not in clean:
                         clean.append(name)
                 tree.excludes = clean
+
+        # Brique G : compaction des dossiers-en-nodes (sur le FileTreeComponent de l'explorateur).
+        if settings.compact_chain is not None:
+            tree = next(
+                (c for c in iter_components(node.root) if isinstance(c, FileTreeComponent)),
+                None,
+            )
+            if tree is not None:
+                tree.compact_chain = settings.compact_chain
 
         # F3b : réglages d'auto-spawn sur le ChatComponent du node chat.
         chat = next((c for c in iter_components(node.root) if isinstance(c, ChatComponent)), None)

@@ -214,6 +214,8 @@
       }
       const intent = window.MekiImpulses && window.MekiImpulses.impulseFor(e);
       if (intent) document.dispatchEvent(new CustomEvent('meki:impulse', { detail: intent }));
+      // Brique G : la node git se rafraîchit à la fin de tour (événementiel, pas de timer).
+      if (ev.type === 'turn_end') document.dispatchEvent(new CustomEvent('meki:turn-end'));
       if (ev.type === 'hook_fired') appendHook(ev);
     }
 

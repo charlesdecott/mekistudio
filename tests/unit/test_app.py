@@ -489,3 +489,14 @@ def test_get_canvas_keeps_pinned_empty_folder(tmp_path):
     pinned = _mk_folder(client, "docs", ephemeral=False)  # épinglé (sorti à la main)
     ids = {n["id"] for n in client.get("/api/canvas").json()["nodes"]}
     assert pinned["id"] in ids  # épinglé -> conservé même vide
+
+
+def test_explorer_compact_chain_setting_persists(tmp_path):
+    client = _client(tmp_path)
+    eid = _ids_by_kind(client)["fileexplorer"]
+    r = client.post(f"/api/canvas/nodes/{eid}/settings", json={"compact_chain": True})
+    assert r.status_code == 200
+    nodes = client.get("/api/canvas").json()["nodes"]
+    fe = next(n for n in nodes if n["kind"] == "fileexplorer")
+    tree = fe["root"]["children"][0]["children"][1]
+    assert tree["type"] == "filetree" and tree["compact_chain"] is True
