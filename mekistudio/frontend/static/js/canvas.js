@@ -23,6 +23,7 @@ document.addEventListener('alpine:init', () => {
     _settingsTree: null,
     _compactMode: false,     // brique G : chaîne de dossiers compacte (lu des réglages explorateur)
     _creatingFolders: {},    // path -> true pendant la création d'un node dossier (anti-doublon)
+    _spawnMaterializing: false, // true pendant un auto-spawn -> les dossiers naissent invisibles (matérialisés par la comète)
     _editors: {},            // états des nodes éditeur, indexés par node id
     _chatViews: {},          // handles des vues chat (WS), indexés par node id
     _zTop: 0,                // dernier z-index attribué (premier plan au clic)
@@ -543,9 +544,15 @@ document.addEventListener('alpine:init', () => {
       this._activePulses += 1;
       try {
         for (const seg of path) {
-          await this.animateComet(seg, seg.childId === drawChildId);
+          // Brique G : la comète CONSTRUIT le câble de tout node neuf ('spawning') qu'elle traverse
+          // (dossiers ET éditeur) et le RÉVÈLE en arrivant -> les dossiers naissent le long de l'impulsion.
+          const childWrap = this.$root.querySelector('.node-wrap[data-id="' + seg.childId + '"]');
+          const building = (childWrap && childWrap.classList.contains('spawning')) || seg.childId === drawChildId;
+          await this.animateComet(seg, building);
           const arrived = seg.dir === 'up' ? seg.parentId : seg.childId;
-          if (arrived !== toId) this.glow(arrived, 'soft', 600);
+          const aw = this.$root.querySelector('.node-wrap[data-id="' + arrived + '"]');
+          if (aw && aw.classList.contains('spawning')) { aw.classList.remove('spawning'); this.glow(arrived, 'strong', 1100); }
+          else if (arrived !== toId) this.glow(arrived, 'soft', 600);
         }
         this.glow(toId, arrivalLevel || 'strong', 1500);
       } finally {
@@ -644,7 +651,12 @@ document.addEventListener('alpine:init', () => {
       this._inFlightSpawns += 1;                            // compte le spawn EN VOL (pas encore dans le DOM) pour le plafond
       this._enforceSpawnCap();
       // Brique G : matérialise la chaîne de dossiers du fichier, puis ancre l'éditeur sur SA node dossier.
+      const beforeFolders = new Set([...this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')].map((w) => w.dataset.id));
+      this._spawnMaterializing = true; // les dossiers naissent invisibles (matérialisés par la comète, pas de flash)
       const folderWrap = await this._ensureFolderChain(path);
+      this._spawnMaterializing = false;
+      const newFolders = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"]')].filter((w) => !beforeFolders.has(w.dataset.id));
+      newFolders.forEach((w) => w.classList.add('spawning')); // sécurité (déjà 'spawning' via le flag)
       const folderId = folderWrap ? folderWrap.dataset.id : undefined;
       const pos = this.editorSpawnPos(folderWrap);
       try {
@@ -677,17 +689,27 @@ document.addEventListener('alpine:init', () => {
         const wrap = this.renderNode(node);               // pose la classe 'ephemeral' + TTL + clic=épingle
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
-        this.layoutFolderTree();                           // place le nouvel éditeur dans l'arbre lisible (tidy)
+        this.layoutFolderTree();                           // dispose tout (les neufs sont invisibles) + auto-fit
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
-        // cache le câble du nouvel éditeur : la comète va le TRACER pixel par pixel en arrivant.
+        // cache les câbles de TOUS les nodes neufs (dossiers + éditeur) : la comète les TRACE en arrivant.
         const svg = this.ensureCablesLayer();
-        const ng = svg && svg.querySelector('g[data-edge="' + node.id + '"]');
-        const ncore = ng && ng.querySelector('.cable-core');
-        if (ncore) { const L = ncore.getTotalLength(); ng.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = '0 ' + (L + 1); }); }
+        const newIds = newFolders.map((w) => w.dataset.id).concat([node.id]);
+        const hideCable = (nid) => {
+          const g = svg && svg.querySelector('g[data-edge="' + nid + '"]');
+          const core = g && g.querySelector('.cable-core');
+          if (core) { const L = core.getTotalLength(); g.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = '0 ' + (L + 1); }); }
+        };
+        newIds.forEach(hideCable);
         const chatId = this.kindId('chat');
-        if (chatId) await this.pulseTo(chatId, node.id, 'strong', node.id); // la comète CONSTRUIT le câble (dernier segment)
-        if (ng) ng.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = ''; pa.style.strokeDashoffset = ''; }); // sécurité : câble complet
-        if (wrap.isConnected) { wrap.classList.remove('spawning'); this.glow(node.id, 'strong', 1500); } // APPARAÎT (sauf si recyclé entre-temps)
+        if (chatId) await this.pulseTo(chatId, node.id, 'strong'); // la comète matérialise dossiers + éditeur le long du chemin
+        // sécurité : câbles complets + tout révélé (si la comète a été court-circuitée par l'anti-emballement)
+        for (const nid of newIds) {
+          const g = svg && svg.querySelector('g[data-edge="' + nid + '"]');
+          if (g) g.querySelectorAll('path').forEach((pa) => { pa.style.strokeDasharray = ''; pa.style.strokeDashoffset = ''; });
+          const w = this.$root.querySelector('.node-wrap[data-id="' + nid + '"]');
+          if (w) w.classList.remove('spawning');
+        }
+        if (wrap.isConnected) this.glow(node.id, 'strong', 1500); // APPARAÎT
       } finally {
         this._inFlightSpawns -= 1;
         delete this._spawning[path];
@@ -1282,7 +1304,12 @@ document.addEventListener('alpine:init', () => {
         if (!r.ok) return null;
         const node = await r.json();
         const world = this.$root.querySelector('.world');
-        if (world) world.appendChild(this.renderNode(node));
+        if (world) {
+          const w = this.renderNode(node);
+          // né INVISIBLE pendant une impulsion : la comète le matérialisera (pas de flash avant).
+          if (this._spawnMaterializing) w.classList.add('spawning');
+          world.appendChild(w);
+        }
         return node;
       } catch (e) { return null; }
       finally {
