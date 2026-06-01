@@ -62,6 +62,7 @@ document.addEventListener('alpine:init', () => {
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
       this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
+      this.layoutFolderTree(); // brique G : dispose le sous-arbre dossiers→fichiers en arbre lisible
       this.refreshGit(); // brique G : charge l'état git de la node « branch git »
       // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
       document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
@@ -676,7 +677,7 @@ document.addEventListener('alpine:init', () => {
         const wrap = this.renderNode(node);               // pose la classe 'ephemeral' + TTL + clic=épingle
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
-        this.drawCables();
+        this.layoutFolderTree();                           // place le nouvel éditeur dans l'arbre lisible (tidy)
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
         // cache le câble du nouvel éditeur : la comète va le TRACER pixel par pixel en arrivant.
         const svg = this.ensureCablesLayer();
@@ -1129,7 +1130,7 @@ document.addEventListener('alpine:init', () => {
         }
         const world = this.$root.querySelector('.world');
         if (world) world.appendChild(this.renderNode(node));
-        this.drawCables(); // câble du nouvel éditeur -> explorateur
+        this.layoutFolderTree(); // place le nouvel éditeur dans l'arbre lisible (tidy)
       } finally {
         this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
@@ -1304,6 +1305,43 @@ document.addEventListener('alpine:init', () => {
         it.classList.toggle('fs-claimed', this._hasFolderNode(it.dataset.path));
       });
     },
+    // Dispose le sous-arbre de l'explorateur (dossiers + éditeurs) en ARBRE LISIBLE : colonnes par
+    // profondeur vers la droite, frères empilés, parent centré (MekiTreeLayout pur). On suit ainsi
+    // l'intrication dossier→…→fichier de gauche à droite, au lieu d'un éparpillement aléatoire.
+    // Ne touche QUE les nodes dossier/éditeur ; le kernel/git/chat/explorateur restent en place.
+    layoutFolderTree() {
+      const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      const L = window.MekiTreeLayout;
+      if (!explorer || !L) { this.drawCables(); return; }
+      const exId = explorer.dataset.id;
+      const exb = this.boxOf(explorer);
+      const wraps = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"], .node-wrap[data-kind="fileeditor"]')];
+      if (!wraps.length) { this.drawCables(); return; }
+      const items = wraps.map((w) => ({
+        id: w.dataset.id,
+        parent: w.dataset.source || '',
+        w: w.offsetWidth,
+        h: w.offsetHeight,
+        // dossiers (préfixe '0') avant fichiers ('1'), puis tri par chemin/nom : ordre stable et lisible.
+        sortKey: w.dataset.kind === 'folder' ? '0' + (w.dataset.folder || '') : '1' + (w.dataset.file || ''),
+      }));
+      // Espacements généreux (l'utilisateur veut de l'air) : colonnes > largeur éditeur, rangées > hauteur éditeur.
+      const pos = L.layoutTree(items, exId, { col: 660, row: 560, rootX: exb.x, rootCy: exb.y + exb.h / 2 });
+      for (const w of wraps) {
+        const p = pos[w.dataset.id];
+        if (!p) continue;
+        const nx = Math.round(p.x), ny = Math.round(p.y);
+        const ox = parseFloat(w.style.left) || 0, oy = parseFloat(w.style.top) || 0;
+        if (Math.abs(ox - nx) > 1 || Math.abs(oy - ny) > 1) {
+          this.clearTranslate(w);
+          w.style.left = nx + 'px';
+          w.style.top = ny + 'px';
+          this._persistPos(w.dataset.id, nx, ny); // garde la disposition au reload
+        }
+      }
+      this.drawCables();
+    },
+
     // Re-câble (DOM) les nodes dossier + éditeurs par plus-long-préfixe — MIROIR du reconcile
     // serveur. Indispensable APRÈS création/suppression d'un node dossier : insérer un ancêtre ou
     // un point de branchement doit re-router les enfants existants tout de suite (sinon câble périmé
@@ -1358,7 +1396,7 @@ document.addEventListener('alpine:init', () => {
       }
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
+      this.layoutFolderTree();
       return this._findFolderForPath(filePath);
     },
     // Recalcule l'ensemble des nodes dossier désirés (déclaratif) — pour le toggle compact et le ménage.
@@ -1377,7 +1415,7 @@ document.addEventListener('alpine:init', () => {
       for (const w of toRemove) await this._removeFolderNode(w);
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
+      this.layoutFolderTree();
     },
 
     // Sortie MANUELLE d'un dossier (clic-droit) -> node dossier ÉPINGLÉE (permanente).
@@ -1386,7 +1424,7 @@ document.addEventListener('alpine:init', () => {
       await this._createFolderNode(path, { pinned: true });
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
+      this.layoutFolderTree();
     },
 
     // Fermeture explicite d'un node dossier (croix). cascade (shift) = ferme aussi les enfants.
@@ -1417,7 +1455,7 @@ document.addEventListener('alpine:init', () => {
       }
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
+      this.layoutFolderTree();
     },
 
     renderComponent(c, node) {

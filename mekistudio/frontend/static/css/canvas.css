@@ -225,8 +225,9 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .cable.cable-default .cable-halo, .cable.cable-default .cable-core { stroke: #8893a7; }
 
 /* --- Anti-collision : ecart/retour anime via transform --- */
-.node-wrap { transition: transform .12s ease-out, box-shadow .3s ease; }
-.node-wrap.dragging { transition: none; } /* le node tenu ne traine pas son transform */
+/* left/top animes : la re-disposition en arbre lisible (brique G) GLISSE au lieu de sauter. */
+.node-wrap { transition: left .28s ease, top .28s ease, transform .12s ease-out, box-shadow .3s ease; }
+.node-wrap.dragging { transition: none; } /* le node tenu ne traine pas son transform/position */
 
 /* --- Impulsions : mini-toolbar, comete, glows --- */
 .node-toolbar {
