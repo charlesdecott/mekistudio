@@ -377,4 +377,9 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .fs-item.fs-claimed { display: none; }
 
 /* node dossier : accent visuel (mini-explorateur enraciné). */
-.node-wrap[data-kind="folder"] .cmp-node { border-color: #2f5a3f; }
+/* brique G : fond SUBTIL (pastel sombre) par TYPE de node — le chat garde le fond par défaut. */
+.node-wrap[data-kind="kernel"] .cmp-node       { background: #1b2236; }  /* slate */
+.node-wrap[data-kind="gitbranch"] .cmp-node    { background: #231c31; }  /* violet */
+.node-wrap[data-kind="fileexplorer"] .cmp-node { background: #182539; }  /* bleu */
+.node-wrap[data-kind="fileeditor"] .cmp-node   { background: #16251f; }  /* vert */
+.node-wrap[data-kind="folder"] .cmp-node       { background: #282116; border-color: #2f5a3f; } /* ambre */
