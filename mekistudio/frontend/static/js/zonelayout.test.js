@@ -52,3 +52,27 @@ test('solve : centres confondus -> séparés de façon déterministe', () => {
   const pos = Z.solve(zones, { iters: 120, VOID: 60 });
   assert.ok(dist(pos.get('a'), pos.get('b')) > 1, 'séparés');
 });
+
+test('packAround : aucun fichier ne chevauche la tuile ni un autre fichier', () => {
+  const center = { x: 500, y: 500 };
+  const folder = { w: 116, h: 108 };
+  const files = Array.from({ length: 6 }, () => ({ w: 150, h: 46 }));
+  const out = Z.packAround(center, folder, files, { gap: 18 });
+  assert.equal(out.length, 6, 'tous les fichiers placés');
+  const boxes = out.map((p, i) => ({ x: p.x, y: p.y, w: files[i].w, h: files[i].h }));
+  const folderBox = { x: center.x - folder.w / 2, y: center.y - folder.h / 2, w: folder.w, h: folder.h };
+  const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  for (let i = 0; i < boxes.length; i++) {
+    assert.ok(!hit(boxes[i], folderBox), 'fichier ' + i + ' ne touche pas la tuile');
+    for (let j = i + 1; j < boxes.length; j++) assert.ok(!hit(boxes[i], boxes[j]), 'fichiers ' + i + '/' + j + ' disjoints');
+  }
+});
+
+test('packAround : déterministe', () => {
+  const c = { x: 0, y: 0 }, f = { w: 116, h: 108 }, files = [{ w: 150, h: 46 }, { w: 150, h: 46 }, { w: 150, h: 46 }];
+  assert.deepEqual(Z.packAround(c, f, files), Z.packAround(c, f, files));
+});
+
+test('packAround : liste vide -> []', () => {
+  assert.deepEqual(Z.packAround({ x: 0, y: 0 }, { w: 116, h: 108 }, []), []);
+});

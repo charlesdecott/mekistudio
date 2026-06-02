@@ -46,7 +46,35 @@
     return pos;
   }
 
-  const MekiZoneLayout = { solve };
+  // Range des fichiers en ANNEAUX concentriques autour de la tuile dossier (anneau proche d'abord,
+  // croissance vers l'extérieur). Aucun chevauchement (tuile + fichiers déjà posés). Déterministe.
+  // Retourne le top-left de chaque fichier, dans le même ordre que `fileSizes`.
+  function packAround(folderCenter, folderSize, fileSizes, opts) {
+    opts = opts || {};
+    const gap = opts.gap == null ? 18 : opts.gap;
+    const out = [];
+    if (!fileSizes || !fileSizes.length) return out;
+    const placed = [{ x: folderCenter.x - folderSize.w / 2, y: folderCenter.y - folderSize.h / 2, w: folderSize.w, h: folderSize.h }];
+    const hit = (a, b) => a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
+    const step = Math.max(...fileSizes.map((s) => Math.max(s.w, s.h))) + gap;
+    const base = Math.max(folderSize.w, folderSize.h) / 2;
+    let idx = 0;
+    for (let ring = 1; ring <= 40 && idx < fileSizes.length; ring++) {
+      const radius = base + ring * step;
+      const slots = Math.max(4, Math.floor((2 * Math.PI * radius) / step));
+      for (let k = 0; k < slots && idx < fileSizes.length; k++) {
+        const ang = (k / slots) * 2 * Math.PI; // déterministe, régulier
+        const fs = fileSizes[idx];
+        const box = { x: folderCenter.x + Math.cos(ang) * radius - fs.w / 2, y: folderCenter.y + Math.sin(ang) * radius - fs.h / 2, w: fs.w, h: fs.h };
+        if (placed.some((p) => hit(p, box))) continue; // créneau pris -> suivant
+        out.push({ x: Math.round(box.x), y: Math.round(box.y) });
+        placed.push(box); idx++;
+      }
+    }
+    return out;
+  }
+
+  const MekiZoneLayout = { solve, packAround };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiZoneLayout;
   if (typeof window !== 'undefined') root.MekiZoneLayout = MekiZoneLayout;
 })(typeof window !== 'undefined' ? window : globalThis);
