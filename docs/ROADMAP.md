@@ -107,13 +107,15 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     plus-long-préfixe, fonction pure testée). **Masquage dérivé** (un dossier sorti disparaît de l'explorateur
     parent), **cycle de vie compté-référence + épingle** (purge fixpoint des dossiers éphémères vides),
     **placement F3 ancré** sur la node dossier (regroupement, câbles dégagés), fermeture non destructive,
-    **réduire/agrandir** générique (`Node.collapsed`). **Disposition organique « neurones »** (`neuro-layout.js`,
-    `layoutFolderTree`) : explorateur au centre, dendrites directionnelles (chaos/longueur/étalement réglés en
-    companion), anti-collision + anti-câble-sous-node, **auto-fit du viewport** (tout voir), **dossiers
-    matérialisés par la comète** comme les fichiers. (1ʳᵉ tentative en arbre vertical rejetée — cf. spec
-    `2026-06-01-canvas-organic-neuron-layout-design`.) Modules purs `node --test` (`folders.js`, `git-node.js`,
-    `neuro-layout.js`, `parenting.py`). Validé pytest + Playwright (chaîne, groupement, 0 câble sous une node,
-    compaction, fermeture, git, réduction, disposition organique centrée). Revue adversariale → défauts corrigés.
+    **réduire/agrandir** générique (`Node.collapsed`). **Placement organique INCRÉMENTAL** (`editorSpawnPos`) :
+    explorateur au centre, chaque nouveau node posé **une seule fois** dans un trou libre en croissant vers
+    l'extérieur (dendrite) ; les nodes existants **ne bougent jamais** (pas de re-layout global → pas de
+    clignotement), **auto-fit du viewport** (tout voir), **dossiers matérialisés par la comète** comme les
+    fichiers. (Tentatives intermédiaires — arbre vertical puis re-layout organique global — rejetées car
+    elles repositionnaient tout à chaque spawn ; cf. spec `2026-06-01-canvas-organic-neuron-layout-design`.)
+    Modules purs `node --test` (`folders.js`, `git-node.js`, `parenting.py`). Validé pytest + Playwright
+    (chaîne, groupement, placement STABLE, compaction, fermeture, git, réduction, comète-dossiers).
+    Revue adversariale → défauts corrigés.
     Spec/plan : `docs/superpowers/{specs,plans}/2026-06-01-node-org-refactor-brick-g*` + `…-organic-neuron-layout-design`.
   - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /

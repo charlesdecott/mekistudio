@@ -87,10 +87,6 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   complète = union des ancêtres ; compacte = fusion des dossiers à enfant unique, split au branchement).
 - **`static/js/git-node.js`** — rendu **pur** de la node git (`window.MekiGitNode`, testé `node --test`) :
   `fmtTitle`/`fmtDetail` (⎇ branche · ↑ahead ↓behind · ● modifs), `render(el, info)`.
-- **`static/js/neuro-layout.js`** — disposition organique « neurones » **pure** (`window.MekiNeuroLayout`,
-  testée `node --test`) : `layout(items, rootId, opts)` place le sous-arbre de l'explorateur de façon
-  **directionnelle** (centre = explorateur, chaque dossier part dans une direction et tourne à chaque
-  niveau → dendrites), déterministe, puis **relaxation** anti-collision **et** anti-câble-sous-node.
 - **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
   `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
   `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
@@ -116,13 +112,13 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   non destructive (`closeFolderNode`, enfants rebranchés au grand-parent ; shift = cascade).
   **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier).
   **Node git** : `refreshGit` (charge `/api/git/branch` au boot et sur `meki:turn-end`).
-  **Disposition organique « neurones »** : `layoutFolderTree` (via `MekiNeuroLayout`) dispose le
-  sous-arbre de l'explorateur en **dendrites directionnelles** (explorateur au centre, éventail biaisé
-  à droite pour éviter la colonne kernel/git/chat) ; `fitView` **auto-zoome** pour tout voir à l'écran.
-  Re-disposé à chaque changement de structure et au boot (positions persistées ; garde anti-drag).
-  **Comète qui matérialise les dossiers** : à l'auto-spawn, les nouveaux dossiers naissent invisibles
-  (`_spawnMaterializing`/`spawning`) et `pulseTo` les **révèle + trace leur câble** le long du chemin
-  (comme les fichiers).
+  **Placement organique INCRÉMENTAL** : `editorSpawnPos(anchorWrap)` pose **chaque nouveau node une
+  seule fois** dans un trou libre près de son parent, en croissant **vers l'extérieur** (dendrite,
+  direction déterministe), câble dégagé (et pas sous un câble existant). Les nodes **existants ne
+  bougent jamais** (pas de re-layout global → pas de clignotement) ; `fitView` **auto-zoome** seulement
+  si ça déborde (tout voir). **Comète qui matérialise les dossiers** : à l'auto-spawn, les nouveaux
+  dossiers naissent invisibles (`_materializingDepth`/`spawning`) et `pulseTo` les **révèle + trace leur
+  câble** le long du chemin (comme les fichiers ; spawn entièrement en try/finally → jamais bloqué invisible).
 - **`static/js/editor.js`** — module ESM **CodeMirror 6** (depuis esm.sh) : expose
   `window.MekiEditor.mount()` ; coloration par extension, guides d'indentation,
   word-wrap, thème oneDark, Ctrl+S ; fallback si le CDN ne charge pas.

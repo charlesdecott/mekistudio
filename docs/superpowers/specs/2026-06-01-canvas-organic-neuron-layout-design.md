@@ -4,6 +4,15 @@
 > Remplace la 1ʳᵉ tentative (arbre « tidy » vertical, `tree-layout.js`) **rejetée** :
 > trop haute, oblige à scroller, doublons, pas la vision. Cf. mémoire
 > `canvas-layout-organic-neuron-vision`.
+>
+> **MISE À JOUR (2026-06-02)** : le re-layout organique GLOBAL décrit ci-dessous (relaxation
+> de tout le sous-arbre à chaque spawn) a été remplacé par un **placement INCRÉMENTAL** suite au
+> retour utilisateur (« à chaque spawn il ne faut pas recalculer toutes les positions, sinon ça
+> clignote »). On garde la **direction** (croissance vers l'extérieur depuis l'explorateur, dendrite)
+> et l'**anti-collision**, mais chaque node est posé **une seule fois** dans un trou libre
+> (`editorSpawnPos`) et les nodes existants **ne bougent plus jamais**. `neuro-layout.js` (relaxation
+> globale) a été supprimé. Le reste de la vision (explorateur centré, comète qui matérialise les
+> dossiers, auto-fit) est conservé.
 
 ## But
 
