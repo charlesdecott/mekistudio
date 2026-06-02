@@ -62,11 +62,10 @@ document.addEventListener('alpine:init', () => {
       this.reconcileOverlaps();   // sépare les nodes hérités qui se chevauchent (zéro recouvrement)
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
-      this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
-      // Brique G : au boot on NE re-calcule PAS les positions (on respecte la disposition persistée :
-      // chaque node a été placé une fois et n'a plus bougé). On cadre juste la 1re ouverture.
-      if (defaultView) this.fitView();
-      this.relayoutZones(); // dispose proprement les zones au chargement (déterministe -> stable au reload)
+      // Brique G : relayoutZones dispose les zones au boot (déterministe -> stable au reload) ; il
+      // (re)dessine les câbles ET cadre la vue en fin. Un layout déjà convergé ne persiste rien
+      // (skip-if-unchanged) -> aucun POST au reload. Crée aussi le layer SVG (après les wraps).
+      this.relayoutZones();
       this.refreshGit(); // brique G : charge l'état git de la node « branch git »
       // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
       document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
@@ -380,7 +379,7 @@ document.addEventListener('alpine:init', () => {
     // redessine câbles + territoires. Remplace le placement "place-once".
     relayoutZones() {
       const ZL = window.MekiZoneLayout, T = window.MekiTerritories;
-      if (!ZL || !T) return;
+      if (!ZL || !T) return; // T requis par folderBlobCorners
       const nb = this.nodeBoxes();
       const groups = this.folderBlobCorners(nb); // tuile + fichiers
       const ctrOf = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
@@ -398,7 +397,7 @@ document.addEventListener('alpine:init', () => {
         const eb = this.boxOf(explorer);
         zones.push({ id: explorer.dataset.id, parentId: null, center: ctrOf(eb), radius: Math.max(eb.w, eb.h) / 2 + 24, pinned: true });
       }
-      if (!zones.length) { this.drawCables(); return; }
+      if (!zones.length) { this.drawCables(); this.fitView(); return; }
       const solved = ZL.solve(zones, { iters: 90, VOID: 60, GAP: 40 });
       // 1) repositionner chaque tuile dossier sur son nouveau centre
       const folderCenters = new Map();
@@ -408,9 +407,12 @@ document.addEventListener('alpine:init', () => {
         if (!w) return;
         const nc = solved.get(z.id);
         const nx = Math.round(nc.x - w.offsetWidth / 2), ny = Math.round(nc.y - w.offsetHeight / 2);
-        w.style.left = nx + 'px'; w.style.top = ny + 'px';
+        this.clearTranslate(w); // efface un push de collision transitoire (sinon boxOf lit center+translate)
         folderCenters.set(z.id, { x: nx + w.offsetWidth / 2, y: ny + w.offsetHeight / 2 });
-        this._persistPos(z.id, nx, ny);
+        if ((parseFloat(w.style.left) || 0) !== nx || (parseFloat(w.style.top) || 0) !== ny) {
+          w.style.left = nx + 'px'; w.style.top = ny + 'px';
+          this._persistPos(z.id, nx, ny); // best-effort ; non appelé si rien ne bouge
+        }
       });
       // 2) ranger les fichiers AUTOUR du centre de leur dossier (ou de l'explorateur)
       const filesBySource = new Map();
@@ -428,8 +430,11 @@ document.addEventListener('alpine:init', () => {
         const spots = ZL.packAround(center, fsize, sizes, { gap: 18 });
         wraps.forEach((w, i) => {
           if (!spots[i]) return;
-          w.style.left = spots[i].x + 'px'; w.style.top = spots[i].y + 'px';
-          this._persistPos(w.dataset.id, spots[i].x, spots[i].y);
+          this.clearTranslate(w);
+          if ((parseFloat(w.style.left) || 0) !== spots[i].x || (parseFloat(w.style.top) || 0) !== spots[i].y) {
+            w.style.left = spots[i].x + 'px'; w.style.top = spots[i].y + 'px';
+            this._persistPos(w.dataset.id, spots[i].x, spots[i].y);
+          }
         });
       });
       this.drawCables(); this.fitView();
