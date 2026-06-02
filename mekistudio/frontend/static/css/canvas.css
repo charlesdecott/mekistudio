@@ -52,6 +52,7 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 }
 .tool-btn:hover { background: rgba(255, 255, 255, .07); color: #c8d0de; }
 .tool-btn.active { background: #2d3a55; color: #eaf0ff; }
+.tool-btn-delete.active { background: #5a2d34; color: #ffc0c0; border-color: #e5484d; } /* mode danger */
 
 /* curseurs selon l'outil actif */
 #canvas.tool-select .node-wrap { cursor: default; }  /* pas le grab du fond */
@@ -59,6 +60,12 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 #canvas.tool-move .node-wrap[data-movable="false"] { cursor: not-allowed; }
 #canvas.tool-resize .node-wrap[data-resizable="true"] { cursor: nwse-resize; }
 #canvas.tool-resize .node-wrap[data-resizable="false"] { cursor: not-allowed; }
+/* mode suppression : pointer + liseré rouge au survol sur les nodes fermables ; sinon interdit. */
+#canvas.tool-delete .node-wrap { cursor: not-allowed; }
+#canvas.tool-delete .node-wrap[data-kind="fileeditor"],
+#canvas.tool-delete .node-wrap[data-kind="folder"] { cursor: pointer; }
+#canvas.tool-delete .node-wrap[data-kind="fileeditor"]:hover .cmp-node,
+#canvas.tool-delete .node-wrap[data-kind="folder"]:hover .cmp-node { outline: 2px solid #e5484d; outline-offset: 2px; }
 
 /* --- composants (rendus par canvas.js dans .world) --- */
 .node-wrap { position: absolute; }

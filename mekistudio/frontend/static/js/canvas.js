@@ -305,6 +305,25 @@ document.addEventListener('alpine:init', () => {
 
     drawCables() { this.drawCablesFrom(this.nodeBoxes()); },
 
+    // Outil suppression : ferme un node FERMABLE en un clic. Fichier -> closeEditor (garde « non
+    // sauvegardé »). Dossier -> closeFolderNode (shift = ferme aussi le contenu). Built-in
+    // (kernel/git/explorateur/chat) non fermables -> petit flash rouge (feedback).
+    async _deleteNode(node, wrap, shift) {
+      if (node.kind === 'folder') { this.closeFolderNode(node, wrap, shift); return; }
+      if (node.kind === 'fileeditor') {
+        const st = this._editors[node.id];
+        if (st) { this.closeEditor(st); return; }
+        let ok = false; // pas d'état éditeur (rare) -> suppression directe
+        try { const r = await fetch('/api/canvas/nodes/' + node.id, { method: 'DELETE' }); ok = r.ok || r.status === 404; } catch (e) { ok = false; }
+        if (!ok) { this.glow(node.id, 'error', 800); return; }
+        this._forgetEphemeral(node.id); this.clearGlow(node.id);
+        if (this.selectedId === node.id) { this.hideToolbar(); this.selectedId = null; }
+        wrap.remove(); this.drawCables(); this.reconcileFolderNodes();
+        return;
+      }
+      this.glow(node.id, 'error', 600); // built-in non supprimable
+    },
+
     // Interaction d'un node selon l'outil actif. Un node ne déclenche jamais le
     // pan du canvas (stopPropagation systématique vers #canvas).
     onNodeMouseDown(e, node, wrap) {
@@ -312,6 +331,11 @@ document.addEventListener('alpine:init', () => {
       if (this.tool === 'select') {
         e.stopPropagation();
         this.selectNode(wrap);
+        return;
+      }
+      if (this.tool === 'delete') {                 // outil suppression : clic = ferme un node fermable
+        e.stopPropagation();
+        this._deleteNode(node, wrap, e.shiftKey);
         return;
       }
       const moving = this.tool === 'move' && node.movable !== false;
