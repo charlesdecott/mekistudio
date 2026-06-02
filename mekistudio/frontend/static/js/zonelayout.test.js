@@ -76,3 +76,17 @@ test('packAround : déterministe', () => {
 test('packAround : liste vide -> []', () => {
   assert.deepEqual(Z.packAround({ x: 0, y: 0 }, { w: 116, h: 108 }, []), []);
 });
+
+test('freestAngle : liste vide -> 0', () => {
+  assert.equal(Z.freestAngle([]), 0);
+});
+
+test('freestAngle : milieu du plus grand secteur libre', () => {
+  const a = Z.freestAngle([0, Math.PI / 2]);
+  assert.ok(Math.abs(a - (5 * Math.PI / 4)) < 1e-6, 'milieu du grand secteur, obtenu ' + a);
+});
+
+test('freestAngle : un seul occupé -> opposé', () => {
+  const a = Z.freestAngle([0]);
+  assert.ok(Math.abs(a - Math.PI) < 1e-6, 'opposé, obtenu ' + a);
+});

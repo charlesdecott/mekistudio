@@ -74,7 +74,21 @@
     return out;
   }
 
-  const MekiZoneLayout = { solve, packAround };
+  // Angle (radians) du MILIEU du plus grand secteur angulaire libre autour d'un centre, étant
+  // donné les angles déjà occupés par les voisins. Sert à initialiser une NOUVELLE zone "vers le vide".
+  function freestAngle(occupied) {
+    if (!occupied || !occupied.length) return 0;
+    if (occupied.length === 1) return occupied[0] + Math.PI;
+    const s = occupied.slice().sort((a, b) => a - b);
+    let best = s[0] + Math.PI, gap = -1;
+    for (let i = 0; i < s.length; i++) {
+      const a0 = s[i], a1 = i + 1 < s.length ? s[i + 1] : s[0] + Math.PI * 2;
+      if (a1 - a0 > gap) { gap = a1 - a0; best = a0 + (a1 - a0) / 2; }
+    }
+    return best;
+  }
+
+  const MekiZoneLayout = { solve, packAround, freestAngle };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiZoneLayout;
   if (typeof window !== 'undefined') root.MekiZoneLayout = MekiZoneLayout;
 })(typeof window !== 'undefined' ? window : globalThis);
