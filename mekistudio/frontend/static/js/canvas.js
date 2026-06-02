@@ -63,7 +63,9 @@ document.addEventListener('alpine:init', () => {
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
       this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
-      this.layoutFolderTree(); // brique G : dispose le sous-arbre dossiers→fichiers en arbre lisible
+      // Brique G : au boot on NE re-calcule PAS les positions (on respecte la disposition persistée :
+      // chaque node a été placé une fois et n'a plus bougé). On cadre juste la 1re ouverture.
+      if (defaultView) this.fitView();
       this.refreshGit(); // brique G : charge l'état git de la node « branch git »
       // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
       document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
@@ -687,7 +689,10 @@ document.addEventListener('alpine:init', () => {
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
         nodeId = node.id;
-        this.layoutFolderTree();                           // dispose tout (les neufs sont invisibles) + auto-fit
+        // les nouveaux nodes (dossiers + éditeur) sont DÉJÀ placés (editorSpawnPos, trou libre) ; on ne
+        // bouge rien d'existant. On (re)dessine les câbles puis on cadre si ça déborde.
+        this.drawCables();
+        this.fitView();
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
         // cache les câbles de TOUS les nodes neufs (dossiers + éditeur) : la comète les TRACE en arrivant.
         const svg = this.ensureCablesLayer();
@@ -1154,58 +1159,71 @@ document.addEventListener('alpine:init', () => {
         }
         const world = this.$root.querySelector('.world');
         if (world) world.appendChild(this.renderNode(node));
-        this.layoutFolderTree(); // place le nouvel éditeur dans l'arbre lisible (tidy)
+        this.drawCables(); this.fitView(); // node déjà placé (editorSpawnPos) ; rien d'existant ne bouge
       } finally {
         this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
     },
-    // Emplacement d'un éditeur spawné : ALÉATOIRE (pas de grille), PLUS LOIN de l'explorateur, et
-    // choisi pour que son câble vers l'explorateur soit DÉGAGÉ (ne passe pas sous un autre node).
-    // On tire des candidats sur un anneau aléatoire autour de l'explorateur ; on garde le 1er qui est
-    // libre ET dont le segment candidat→explorateur ne traverse aucun autre node. Repli : 1er libre.
+    // Emplacement d'un NOUVEAU node (éditeur OU dossier) près de son ANCRE (parent), en croissant
+    // VERS L'EXTÉRIEUR (dendrite) dans le 1er TROU LIBRE, câble dégagé. Placé UNE SEULE FOIS puis
+    // laissé en place : on ne re-calcule JAMAIS les positions des nodes existants (pas de clignotement).
+    // Éventail déterministe (sans aléa) -> placement prévisible et stable.
     editorSpawnPos(anchorWrap = null, size = { w: 520, h: 440 }) {
       const C = window.MekiCollision, K = window.MekiCables;
-      // Brique G : ancre = la node dossier du fichier si fournie, sinon l'explorateur (compat).
-      const ex = anchorWrap || this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
-      let exb = { x: 360, y: 0, w: 300, h: 200 };
-      if (ex) exb = this.boxOf(ex);
-      const exC = { x: exb.x + exb.w / 2, y: exb.y + exb.h / 2 };
-      const all = [], cableObs = [], occupied = []; // all = anti-chevauchement ; cableObs = test câble ; occupied = angles pris
+      const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      const ex = anchorWrap || explorer;                 // ancre = node dossier du fichier, sinon explorateur
+      let ab = { x: 360, y: 0, w: 300, h: 200 };
+      if (ex) ab = this.boxOf(ex);
+      const aC = { x: ab.x + ab.w / 2, y: ab.y + ab.h / 2 }; // centre de l'ancre (le parent)
+      let exC = aC;
+      if (explorer) { const b = this.boxOf(explorer); exC = { x: b.x + b.w / 2, y: b.y + b.h / 2 }; }
+      const all = [], cableObs = [], occupied = [];
       this.$root.querySelectorAll('.node-wrap').forEach((w) => {
         const box = this.boxOf(w); all.push(box);
-        if (w === ex) return; // l'ancre (explorateur OU dossier) est exclue du test de câble
+        if (w === ex) return;                            // l'ancre est exclue du test de câble
         cableObs.push(box);
-        occupied.push(Math.atan2((box.y + box.h / 2) - exC.y, (box.x + box.w / 2) - exC.x));
+        occupied.push(Math.atan2((box.y + box.h / 2) - aC.y, (box.x + box.w / 2) - aC.x));
       });
-      this._pendingSpots.forEach((s) => { all.push(s); cableObs.push(s); occupied.push(Math.atan2((s.y + s.h / 2) - exC.y, (s.x + s.w / 2) - exC.x)); });
-      // direction = milieu du plus grand SECTEUR ANGULAIRE LIBRE autour de l'explorateur : le « rayon »
-      // (câble) du nouvel éditeur ne croise alors aucun autre node -> pas de câble sous une node.
-      let baseAng = Math.random() * Math.PI * 2, gap = Math.PI * 2;
-      if (occupied.length) {
-        occupied.sort((a, b) => a - b);
-        gap = -1;
-        for (let i = 0; i < occupied.length; i++) {
-          const a0 = occupied[i];
-          const a1 = i + 1 < occupied.length ? occupied[i + 1] : occupied[0] + Math.PI * 2;
+      this._pendingSpots.forEach((s) => { all.push(s); cableObs.push(s); occupied.push(Math.atan2((s.y + s.h / 2) - aC.y, (s.x + s.w / 2) - aC.x)); });
+      // câbles EXISTANTS (tracés) : on évite aussi de poser le nouveau node DESSUS (pas de câble sous une node).
+      const cablePaths = [];
+      const svg = this.$root.querySelector('.world svg.cables');
+      if (svg) svg.querySelectorAll('g[data-edge] .cable-core').forEach((c) => {
+        const nums = (c.getAttribute('d') || '').match(/-?\d+(\.\d+)?/g) || [];
+        const pts = []; for (let i = 0; i + 1 < nums.length; i += 2) pts.push({ x: +nums[i], y: +nums[i + 1] });
+        if (pts.length >= 2) cablePaths.push(pts);
+      });
+      // Direction de base = VERS L'EXTÉRIEUR (de l'explorateur à travers l'ancre) -> la dendrite pousse
+      // dehors. Si l'ancre EST l'explorateur (1er niveau), on vise le milieu du plus grand secteur libre.
+      let baseAng;
+      const odx = aC.x - exC.x, ody = aC.y - exC.y;
+      if (Math.hypot(odx, ody) > 5) {
+        baseAng = Math.atan2(ody, odx);
+      } else {
+        baseAng = 0; let gap = -1;
+        const occ = occupied.slice().sort((a, b) => a - b);
+        for (let i = 0; i < occ.length; i++) {
+          const a0 = occ[i], a1 = i + 1 < occ.length ? occ[i + 1] : occ[0] + Math.PI * 2;
           if (a1 - a0 > gap) { gap = a1 - a0; baseAng = a0 + (a1 - a0) / 2; }
         }
       }
-      const minR = Math.max(exb.w, exb.h) / 2 + 360; // plus loin qu'avant (~40px du bord), pas trop (câbles courts)
+      const minR = Math.max(ab.w, ab.h) / 2 + Math.max(size.w, size.h) / 2 + 70;
       const at = (x, y) => ({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h });
-      const center = (s) => ({ x: s.x + size.w / 2, y: s.y + size.h / 2 });
+      const ctr = (s) => ({ x: s.x + size.w / 2, y: s.y + size.h / 2 });
       let fallback = null;
-      for (let i = 0; i < 40; i++) {
-        // anneau resserré (distances proches) + secteur libre -> rayons quasi radiaux qui ne se croisent pas
-        const ang = baseAng + (Math.random() - 0.5) * Math.min(gap * 0.55, 0.6); // jitter dans le secteur (aléatoire)
-        const dist = minR + Math.random() * 230;
-        const cand = at(exC.x + Math.cos(ang) * dist - size.w / 2, exC.y + Math.sin(ang) * dist - size.h / 2);
-        if (!C.isFree(cand, all, C.GAP)) continue;        // ne pas chevaucher un node existant
-        if (!fallback) fallback = cand;                    // 1er spot libre -> repli si aucun "dégagé"
-        if (K && K.pathHits([center(cand), exC], cableObs)) continue; // câble traverserait un autre node -> on rejette
+      for (let i = 0; i < 60; i++) {
+        const off = ((i % 2) ? 1 : -1) * Math.ceil(i / 2) * 0.2; // éventail ± autour de la direction extérieure
+        const ang = baseAng + off;
+        const dist = minR + Math.floor(i / 18) * 150;          // élargit l'anneau si tout est pris
+        const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
+        if (!C.isFree(cand, all, C.GAP)) continue;             // pas de chevauchement
+        if (!fallback) fallback = cand;
+        if (K && K.pathHits([ctr(cand), aC], cableObs)) continue; // le câble du node ne traverse pas un autre node
+        if (K && cablePaths.some((pts) => K.pathHits(pts, [cand]))) continue; // ni un câble existant ne passe sous le node
         this._pendingSpots.push(cand);
         return cand;
       }
-      const spot = fallback || C.findFreeSpot({ x: exC.x + minR, y: exC.y - size.h / 2 }, size, all, C.GAP);
+      const spot = fallback || C.findFreeSpot({ x: aC.x + minR, y: aC.y - size.h / 2 }, size, all, C.GAP);
       this._pendingSpots.push({ x: spot.x, y: spot.y, w: size.w, h: size.h });
       return spot;
     },
@@ -1335,55 +1353,6 @@ document.addEventListener('alpine:init', () => {
         it.classList.toggle('fs-claimed', this._hasFolderNode(it.dataset.path));
       });
     },
-    // Dispose le sous-arbre de l'explorateur (dossiers + éditeurs) de façon ORGANIQUE « neurones » :
-    // explorateur au centre, chaque dossier part dans une direction et tourne à chaque niveau
-    // (dendrites), frères éclatés, sans recouvrement (MekiNeuroLayout pur, déterministe). On évite la
-    // « colonne vertébrale » (kernel/git/chat à gauche) via un arc biaisé à droite + obstacles fixes.
-    // Ne touche QUE les nodes dossier/éditeur. Puis auto-fit du viewport (tout voir).
-    layoutFolderTree() {
-      const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
-      const L = window.MekiNeuroLayout;
-      if (!explorer || !L) { this.drawCables(); return; }
-      // Ne PAS perturber un déplacement en cours (un spawn chat peut tomber pendant un drag).
-      if (this.$root.querySelector('.node-wrap.dragging')) return;
-      const exId = explorer.dataset.id;
-      const exb = this.boxOf(explorer);
-      const wraps = [...this.$root.querySelectorAll('.node-wrap[data-kind="folder"], .node-wrap[data-kind="fileeditor"]')];
-      if (!wraps.length) { this.drawCables(); return; }
-      const items = wraps.map((w) => ({
-        id: w.dataset.id,
-        parent: w.dataset.source || '',
-        w: w.offsetWidth,
-        h: w.offsetHeight,
-        sortKey: w.dataset.kind === 'folder' ? '0' + (w.dataset.folder || '') : '1' + (w.dataset.file || ''),
-      }));
-      // colonne vertébrale figée (kernel/git/chat) = obstacles ; le câble explorateur→git sort à gauche.
-      const obstacles = [];
-      this.$root.querySelectorAll('.node-wrap[data-kind="kernel"], .node-wrap[data-kind="gitbranch"], .node-wrap[data-kind="chat"]')
-        .forEach((f) => obstacles.push(this.boxOf(f)));
-      const pos = L.layout(items, exId, {
-        rootX: exb.x + exb.w / 2, rootY: exb.y + exb.h / 2, rootW: exb.w, rootH: exb.h,
-        chaos: 0.25, length: 180, spread: 1.0,        // réglages validés (companion)
-        arcStart: -0.58 * Math.PI, arcSpan: 1.16 * Math.PI, // éventail à droite (la colonne kernel/git/chat est à gauche)
-        gap: 58,   // écart mini généreux : laisse des couloirs au routeur de câbles (subway évite les nodes)
-        obstacles,
-      });
-      for (const w of wraps) {
-        const p = pos[w.dataset.id];
-        if (!p) continue;
-        const nx = Math.round(p.x), ny = Math.round(p.y);
-        const ox = parseFloat(w.style.left) || 0, oy = parseFloat(w.style.top) || 0;
-        if (Math.abs(ox - nx) > 1 || Math.abs(oy - ny) > 1) {
-          this.clearTranslate(w);
-          w.style.left = nx + 'px';
-          w.style.top = ny + 'px';
-          this._persistPos(w.dataset.id, nx, ny);
-        }
-      }
-      this.drawCables();
-      this.fitView(); // tout le « cerveau » à l'écran (zoom seulement si ça déborde)
-    },
-
     // Ajuste le viewport pour que TOUS les nodes tiennent à l'écran (auto-zoom). Ne dérange la vue
     // que si quelque chose déborde (sinon on respecte le pan/zoom courant). `force` recadre toujours.
     fitView(force) {
@@ -1479,7 +1448,8 @@ document.addEventListener('alpine:init', () => {
       for (const w of toRemove) await this._removeFolderNode(w);
       this._refreshFolderClaims();
       this._recableFolders();
-      this.layoutFolderTree();
+      this.drawCables();
+      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
     },
 
     // Sortie MANUELLE d'un dossier (clic-droit) -> node dossier ÉPINGLÉE (permanente).
@@ -1488,7 +1458,8 @@ document.addEventListener('alpine:init', () => {
       await this._createFolderNode(path, { pinned: true });
       this._refreshFolderClaims();
       this._recableFolders();
-      this.layoutFolderTree();
+      this.drawCables();
+      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
     },
 
     // Fermeture explicite d'un node dossier (croix). cascade (shift) = ferme aussi les enfants.
@@ -1519,7 +1490,8 @@ document.addEventListener('alpine:init', () => {
       }
       this._refreshFolderClaims();
       this._recableFolders();
-      this.layoutFolderTree();
+      this.drawCables();
+      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
     },
 
     renderComponent(c, node) {
