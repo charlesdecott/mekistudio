@@ -71,3 +71,16 @@ test('dilate : offset d arête -> impose le VIDE réel (gap 40px)', () => {
 test('convexPolysIntersect : polygone dégénéré (<3 pts) -> false', () => {
   assert.equal(T.convexPolysIntersect([{ x: 0, y: 0 }, { x: 1, y: 1 }], [{ x: 0, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }]), false);
 });
+
+test('roundedHullPath : la zone englobe la tuile dossier (centre dedans)', () => {
+  // tuile dossier + 2 fichiers autour -> le blob doit contenir le centre de la tuile
+  const folder = T.boxCorners({ x: 480, y: 470, w: 116, h: 108 }); // centre (538, 524)
+  const fileA = T.boxCorners({ x: 480, y: 340, w: 150, h: 46 });
+  const fileB = T.boxCorners({ x: 480, y: 600, w: 150, h: 46 });
+  const d = T.roundedHullPath(folder.concat(fileA, fileB), 22);
+  const nums = d.match(/-?\d+(\.\d+)?/g).map(Number);
+  const xs = nums.filter((_, i) => i % 2 === 0), ys = nums.filter((_, i) => i % 2 === 1);
+  // bornes du blob — le centre de la tuile (538,524) est strictement à l'intérieur
+  assert.ok(Math.min(...xs) < 538 && Math.max(...xs) > 538, 'tuile dans la zone en x');
+  assert.ok(Math.min(...ys) < 524 && Math.max(...ys) > 524, 'tuile dans la zone en y');
+});

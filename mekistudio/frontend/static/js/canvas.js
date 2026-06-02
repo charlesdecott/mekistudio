@@ -184,15 +184,18 @@ document.addEventListener('alpine:init', () => {
       return h;
     },
 
-    // Coins définissant la ZONE de chaque dossier : ses FICHIERS DIRECTS, et EUX SEULS. Ni la node
-    // dossier (elle fait le PONT : elle vit dans le VIDE entre la zone parent et sa propre zone),
-    // ni les sous-dossiers (chacun a sa zone séparée par un vide). 2 règles strictes : aucune zone
-    // n'en touche une autre (vide partout) ; un dossier relie 2 zones via le vide. Un dossier sans
-    // fichier direct n'a pas de zone (pur point de branchement). Map id dossier -> [points].
+    // Coins définissant la ZONE de chaque dossier : SA PROPRE TUILE (centre de la zone) + ses
+    // FICHIERS DIRECTS. Le dossier est ainsi AU CENTRE de son blob, pas dans le vide. Les
+    // sous-dossiers ont chacun leur zone séparée (vide entre zones de niveaux différents).
+    // Map id dossier -> [points].
     folderBlobCorners(nodes) {
       const T = window.MekiTerritories;
       const groups = new Map();
-      nodes.forEach((info, id) => { if (info.kind === 'folder') groups.set(id, []); });
+      // La zone d'un dossier inclut désormais SA PROPRE tuile (centre de la zone) + ses fichiers directs.
+      nodes.forEach((info, id) => {
+        if (info.kind !== 'folder') return;
+        groups.set(id, T.boxCorners(info.box).slice()); // la tuile dossier amorce le hull
+      });
       nodes.forEach((info) => {
         const pid = info.source;
         if (info.kind !== 'fileeditor' || !pid || !groups.has(pid)) return; // FICHIERS directs uniquement
