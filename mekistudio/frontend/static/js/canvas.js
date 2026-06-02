@@ -164,6 +164,70 @@ document.addEventListener('alpine:init', () => {
       return svg;
     },
 
+    // Layer SVG des « territoires » de dossier, TOUT premier enfant de .world (sous les câbles).
+    ensureTerritoriesLayer() {
+      const world = this.$root.querySelector('.world');
+      if (!world) return null;
+      let svg = world.querySelector('svg.territories');
+      if (!svg) {
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'territories');
+      }
+      if (world.firstChild !== svg) world.insertBefore(svg, world.firstChild);
+      return svg;
+    },
+
+    // Teinte stable (hue) d'un dossier dérivée de son chemin -> chaque territoire a sa couleur.
+    _folderHue(path) {
+      let h = 0;
+      for (let i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) % 360;
+      return h;
+    },
+
+    // Coins définissant la ZONE de chaque dossier : ses FICHIERS DIRECTS, et EUX SEULS. Ni la node
+    // dossier (elle fait le PONT : elle vit dans le VIDE entre la zone parent et sa propre zone),
+    // ni les sous-dossiers (chacun a sa zone séparée par un vide). 2 règles strictes : aucune zone
+    // n'en touche une autre (vide partout) ; un dossier relie 2 zones via le vide. Un dossier sans
+    // fichier direct n'a pas de zone (pur point de branchement). Map id dossier -> [points].
+    folderBlobCorners(nodes) {
+      const T = window.MekiTerritories;
+      const groups = new Map();
+      nodes.forEach((info, id) => { if (info.kind === 'folder') groups.set(id, []); });
+      nodes.forEach((info) => {
+        const pid = info.source;
+        if (info.kind !== 'fileeditor' || !pid || !groups.has(pid)) return; // FICHIERS directs uniquement
+        for (const p of T.boxCorners(info.box)) groups.get(pid).push(p);
+      });
+      return groups;
+    },
+
+    // Trace un blob arrondi par dossier autour de sa ZONE (cf. folderBlobCorners). DOM impératif.
+    drawFolderTerritories(nodes) {
+      const svg = this.ensureTerritoriesLayer();
+      const T = window.MekiTerritories;
+      if (!svg || !T) return;
+      const groups = this.folderBlobCorners(nodes);
+      const seen = new Set();
+      groups.forEach((pts, id) => {
+        const d = pts.length ? T.roundedHullPath(pts, 22) : '';
+        if (!d) return;
+        seen.add(id);
+        let p = svg.querySelector('path[data-terri="' + id + '"]');
+        if (!p) {
+          p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          p.dataset.terri = id; p.setAttribute('class', 'terri');
+          svg.appendChild(p);
+        }
+        // teinte stable depuis le chemin du dossier (data-folder sur le wrap)
+        const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+        const hue = this._folderHue((wrap && wrap.dataset.folder) || id);
+        p.setAttribute('d', d);
+        p.setAttribute('fill', 'hsla(' + hue + ', 45%, 52%, 0.07)');
+        p.setAttribute('stroke', 'hsla(' + hue + ', 55%, 60%, 0.32)');
+      });
+      svg.querySelectorAll('path[data-terri]').forEach((p) => { if (!seen.has(p.dataset.terri)) p.remove(); });
+    },
+
     // Lit les boîtes de tous les nodes depuis le DOM : Map id -> {box, kind, source}.
     nodeBoxes() {
       const map = new Map();
@@ -301,6 +365,8 @@ document.addEventListener('alpine:init', () => {
       svg.querySelectorAll('g[data-edge]').forEach((g) => {
         if (!seen.has(g.dataset.edge)) g.remove();
       });
+      // 6) territoires de dossier (blobs sous les câbles), recalculés en phase
+      this.drawFolderTerritories(nodes);
     },
 
     drawCables() { this.drawCablesFrom(this.nodeBoxes()); },
@@ -699,7 +765,7 @@ document.addEventListener('alpine:init', () => {
         // Brique G : matérialise la chaîne de dossiers du fichier, puis ancre l'éditeur sur SA node dossier.
         const folderWrap = await this._ensureFolderChain(path, created);
         const folderId = folderWrap ? folderWrap.dataset.id : undefined;
-        pos = this.editorSpawnPos(folderWrap);
+        pos = this.editorSpawnPos(folderWrap, { w: 210, h: 64 }); // taille de l'éditeur RÉDUIT (read) -> anneau serré, câble court
         let node;
         try {
           const r = await fetch('/api/canvas/nodes', {
@@ -1216,8 +1282,8 @@ document.addEventListener('alpine:init', () => {
     // VERS L'EXTÉRIEUR (dendrite) dans le 1er TROU LIBRE, câble dégagé. Placé UNE SEULE FOIS puis
     // laissé en place : on ne re-calcule JAMAIS les positions des nodes existants (pas de clignotement).
     // Éventail déterministe (sans aléa) -> placement prévisible et stable.
-    editorSpawnPos(anchorWrap = null, size = { w: 520, h: 440 }) {
-      const C = window.MekiCollision, K = window.MekiCables;
+    editorSpawnPos(anchorWrap = null, size = { w: 520, h: 440 }, kind = 'fileeditor') {
+      const C = window.MekiCollision, K = window.MekiCables, T = window.MekiTerritories;
       const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
       const ex = anchorWrap || explorer;                 // ancre = node dossier du fichier, sinon explorateur
       let ab = { x: 360, y: 0, w: 300, h: 200 };
@@ -1255,25 +1321,81 @@ document.addEventListener('alpine:init', () => {
           if (a1 - a0 > gap) { gap = a1 - a0; baseAng = a0 + (a1 - a0) / 2; }
         }
       }
-      const minR = Math.max(ab.w, ab.h) / 2 + Math.max(size.w, size.h) / 2 + 70;
+      const minR = Math.max(ab.w, ab.h) / 2 + Math.max(size.w, size.h) / 2 + 28; // marge resserrée -> câbles plus courts
       const at = (x, y) => ({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h });
       const ctr = (s) => ({ x: s.x + size.w / 2, y: s.y + size.h / 2 });
-      let fallback = null;
-      for (let i = 0; i < 60; i++) {
-        const off = ((i % 2) ? 1 : -1) * Math.ceil(i / 2) * 0.2; // éventail ± autour de la direction extérieure
-        const ang = baseAng + off;
-        const dist = minR + Math.floor(i / 18) * 150;          // élargit l'anneau si tout est pris
-        const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
-        if (!C.isFree(cand, all, C.GAP)) continue;             // pas de chevauchement
-        if (!fallback) fallback = cand;
-        if (K && K.pathHits([ctr(cand), aC], cableObs)) continue; // le câble du node ne traverse pas un autre node
-        if (K && cablePaths.some((pts) => K.pathHits(pts, [cand]))) continue; // ni un câble existant ne passe sous le node
-        this._pendingSpots.push(cand);
-        return cand;
+      // RÉPULSION STRICTE — 2 règles : (1) la zone d'un dossier ne touche AUCUNE autre zone : on
+      // exige un VIDE (on dilate la zone candidate de VOID avant le test d'intersection contre
+      // TOUTES les autres zones, frères ET parent/enfant) ; (2) une node DOSSIER ne doit être dans
+      // aucune zone — elle fait le pont DANS le vide. Zone = fichiers directs (cf. folderBlobCorners).
+      // tag d'un spot EN ATTENTE : fid (dossier dont l'éditeur rejoint la zone) ou folder=true, pour
+      // que des spawns CONCURRENTS voient mutuellement leur zone/dossier pas encore dans le DOM.
+      const tag = (s) => (kind === 'folder')
+        ? { x: s.x, y: s.y, w: size.w, h: size.h, folder: true }
+        : { x: s.x, y: s.y, w: size.w, h: size.h, ed: true, fid: (anchorWrap && anchorWrap.dataset.kind === 'folder') ? anchorWrap.dataset.id : '' };
+      let repel = null;
+      if (T && anchorWrap && anchorWrap.dataset.kind === 'folder') {
+        const nb = this.nodeBoxes();
+        const groups = this.folderBlobCorners(nb);
+        // zones EN ATTENTE : éditeurs de spawns concurrents pas encore rendus (sinon 2 zones posées
+        // "en même temps" se chevauchent, aucune ne voyant l'autre).
+        this._pendingSpots.forEach((s) => { if (s.ed && s.fid && groups.has(s.fid)) for (const c of T.boxCorners(s)) groups.get(s.fid).push(c); });
+        const zones = [];           // {fid, hull} de chaque zone (≥1 fichier)
+        groups.forEach((pts, fid) => { if (pts.length >= 3) { const h = T.convexHull(pts); if (h.length >= 3) zones.push({ fid, hull: h }); } });
+        const folders = [];         // {fid|null, hull} : nodes dossier (DOM + en attente) hors des zones
+        nb.forEach((info, id) => { if (info.kind === 'folder') folders.push({ fid: id, hull: T.convexHull(T.boxCorners(info.box)) }); });
+        this._pendingSpots.forEach((s) => { if (s.folder) folders.push({ fid: null, hull: T.convexHull(T.boxCorners(s)) }); });
+        repel = { base: groups.get(anchorWrap.dataset.id) || [], anchorId: anchorWrap.dataset.id, zones, folders, isFolder: kind === 'folder' };
       }
-      const spot = fallback || C.findFreeSpot({ x: aC.x + minR, y: aC.y - size.h / 2 }, size, all, C.GAP);
-      this._pendingSpots.push({ x: spot.x, y: spot.y, w: size.w, h: size.h });
-      return spot;
+      const VOID = 60;  // vide minimal garanti entre deux zones (> 2× le pad de dessin)
+      const DRAW = 26;  // marge ≈ pad de dessin du blob (22) : on raisonne sur le blob VISIBLE
+      const repelOk = (cand) => {
+        if (!repel) return true;
+        const box = T.convexHull(T.boxCorners(cand));
+        if (repel.isFolder) {
+          // (2) la node dossier candidate ne doit toucher AUCUN blob dessiné (le vide est son habitat)
+          return !repel.zones.some((z) => T.convexPolysIntersect(box, T.dilate(z.hull, DRAW)));
+        }
+        // (1) la zone (ancre + ce fichier) reste à ≥ VIDE de TOUTE autre zone
+        const aug = T.convexHull(repel.base.concat(box));
+        if (aug.length < 3) return true;
+        if (repel.zones.some((z) => z.fid !== repel.anchorId && T.convexPolysIntersect(T.dilate(aug, VOID), z.hull))) return false;
+        // (2) la zone ne dépasse pas dans une node dossier : marge 0 pour SA propre node (elle reste
+        // sur la BORDURE de sa zone), marge DRAW pour les autres (qui vivent dans le vide, hors zone).
+        return !repel.folders.some((f) => T.convexPolysIntersect(T.dilate(aug, f.fid === repel.anchorId ? 0 : DRAW), f.hull));
+      };
+      // Les fichiers d'un dossier se PACKENT en anneaux serrés directement VERS L'EXTÉRIEUR du
+      // dossier (cône borné), jamais en arc large : la zone reste un petit COIN convexe LOCAL (la
+      // node dossier à son bord intérieur), au lieu d'un arc dont l'enveloppe convexe engloberait
+      // les zones voisines. Le packing par anneau (proche d'abord) garde la zone compacte.
+      const valid = (cand) => C.isFree(cand, all, C.GAP)
+        && !(K && K.pathHits([ctr(cand), aC], cableObs))
+        && !(K && cablePaths.some((pts) => K.pathHits(pts, [cand])))
+        && repelOk(cand);
+      const fOffs = [0, 0.26, -0.26, 0.52, -0.52, 0.78, -0.78, 1.04, -1.04, 1.3, -1.3];
+      for (let ring = 0; ring < 16; ring++) {
+        const dist = minR + ring * 80;
+        for (const off of fOffs) {
+          const ang = baseAng + off;
+          const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
+          if (valid(cand)) { const t = tag(cand); this._pendingSpots.push(t); return t; }
+        }
+      }
+      // GARANTIE des règles : balayage PLEIN CERCLE à rayon croissant pour un spot repel-OK (il y a
+      // toujours de la place loin). On ne retombe JAMAIS sur un spot qui violerait le vide entre zones.
+      for (let ring = 1; ring <= 32; ring++) {
+        const dist = minR + ring * 75;
+        for (let k = 0; k < 24; k++) {
+          const ang = baseAng + ((k % 2) ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12);
+          const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
+          if (C.isFree(cand, all, C.GAP) && repelOk(cand)) { const t = tag(cand); this._pendingSpots.push(t); return t; }
+        }
+      }
+      // dernier recours (quasi jamais atteint) : un trou libre, quitte à frôler une zone.
+      const spot = C.findFreeSpot({ x: aC.x + minR, y: aC.y - size.h / 2 }, size, all, C.GAP);
+      const t = tag({ x: spot.x, y: spot.y });
+      this._pendingSpots.push(t);
+      return t;
     },
     // ===== Brique G : node git, dossiers-en-nodes, réduire/agrandir =====
 
@@ -1367,7 +1489,7 @@ document.addEventListener('alpine:init', () => {
       if (!path || this._hasFolderNode(path) || this._creatingFolders[path]) return null;
       this._creatingFolders[path] = true;
       const anchor = this._nearestFolderAnchor(path);
-      const pos = this.editorSpawnPos(anchor, { w: 300, h: 320 });
+      const pos = this.editorSpawnPos(anchor, { w: 130, h: 120 }, 'folder'); // tuile dossier RÉDUITE -> câble court
       try {
         const r = await fetch('/api/canvas/nodes', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },

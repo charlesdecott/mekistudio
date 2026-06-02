@@ -219,6 +219,14 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .fs-error:hover { background: none; }
 /* (scrollbar discrète : voir la règle globale en tête de fichier) */
 
+/* --- Territoires de dossier (layer SVG, SOUS les câbles) --- */
+.territories {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+  overflow: visible; pointer-events: none;
+  z-index: -2; /* encore derrière les câbles (-1) */
+}
+.territories .terri { stroke-width: 1.5; transition: opacity .3s ease; }
+
 /* --- Câbles (layer SVG dans .world, sous tous les node-wrap) --- */
 .cables {
   position: absolute; left: 0; top: 0; width: 1px; height: 1px;
