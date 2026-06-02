@@ -87,6 +87,7 @@ class NodeCreate(BaseModel):
     ephemeral: bool = False
     expires_at_ms: int | None = None
     path: Annotated[str, Field(max_length=4096)] | None = None  # brique G : chemin d'un node dossier
+    collapsed: bool = False  # brique G : node créé réduit (ex. dossiers ; éditeur auto-spawné d'un read)
 
 
 def _clamp(value: float, lo: float, hi: float | None) -> float:
@@ -233,6 +234,7 @@ async def create_node(request: Request, body: NodeCreate) -> dict:
             node.source_id = derive_source_id(state, node)
         node.ephemeral = body.ephemeral
         node.expires_at_ms = body.expires_at_ms
+        node.collapsed = body.collapsed
         state.nodes.append(node)
         # Brique G : insérer un node dossier peut re-parenter par préfixe des nodes existants
         # (un dossier plus profond créé AVANT son ancêtre lors d'une rafale, ou un point de

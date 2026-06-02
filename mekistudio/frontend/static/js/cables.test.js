@@ -79,11 +79,20 @@ test('pointsToPath: M..L.. uniquement, segments = points-1', () => {
   assert.ok(!/[CQA]/.test(d), 'pas de courbe');
 });
 
-test('cableClass: paires connues + fallback neutre', () => {
-  assert.equal(C.cableClass('fileexplorer', 'kernel'), 'k2e');
-  assert.equal(C.cableClass('fileeditor', 'fileexplorer'), 'e2e');
-  assert.equal(C.cableClass('chat', 'fileeditor'), 'cable-default');     // futur, non mappé
-  assert.equal(C.cableClass('fileeditor', ''), 'cable-default');          // parent introuvable
+test('cableClass: couleur par relation (brique G)', () => {
+  // git : tout câble touchant la node branche git
+  assert.equal(C.cableClass('gitbranch', 'kernel'), 'cab-git');
+  assert.equal(C.cableClass('fileexplorer', 'gitbranch'), 'cab-git');
+  assert.equal(C.cableClass('chat', 'gitbranch'), 'cab-git');
+  // fichier : tout câble reliant un éditeur (l'éditeur est toujours l'enfant/feuille)
+  assert.equal(C.cableClass('fileeditor', 'folder'), 'cab-file');
+  assert.equal(C.cableClass('fileeditor', 'fileexplorer'), 'cab-file');   // fichier à la racine
+  // explorateur → dossier de profondeur 1
+  assert.equal(C.cableClass('folder', 'fileexplorer'), 'cab-d1');
+  // dossier → dossier
+  assert.equal(C.cableClass('folder', 'folder'), 'cab-folder');
+  // fallback neutre
+  assert.equal(C.cableClass('chat', ''), 'cable-default');
 });
 
 // --- Raffinements routage : contournement d'obstacles + anti-superposition ---

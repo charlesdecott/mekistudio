@@ -450,6 +450,14 @@ def test_create_editor_parents_to_folder_via_override(tmp_path):
     assert ed["source_id"] == docs["id"]
 
 
+def test_create_node_collapsed(tmp_path):
+    client = _client(tmp_path)
+    ed = client.post("/api/canvas/nodes", json={"kind": "fileeditor", "x": 1, "y": 1, "collapsed": True}).json()
+    assert ed["collapsed"] is True
+    ed2 = client.post("/api/canvas/nodes", json={"kind": "fileeditor", "x": 2, "y": 2}).json()
+    assert ed2["collapsed"] is False  # défaut
+
+
 def test_collapse_node_persists(tmp_path):
     client = _client(tmp_path)
     gid = _ids_by_kind(client)["gitbranch"]

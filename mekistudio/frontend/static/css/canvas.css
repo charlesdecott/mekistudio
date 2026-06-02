@@ -220,8 +220,11 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 }
 .cable .cable-halo { fill: none; stroke-width: 7; opacity: .22; stroke-linecap: round; stroke-linejoin: round; }
 .cable .cable-core { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.cable.k2e .cable-halo, .cable.k2e .cable-core { stroke: #b388ff; }
-.cable.e2e .cable-halo, .cable.e2e .cable-core { stroke: #45d6c2; }
+/* brique G : couleur du câble par relation */
+.cable.cab-git .cable-halo,    .cable.cab-git .cable-core    { stroke: #b388ff; } /* node branche git — violet */
+.cable.cab-d1 .cable-halo,     .cable.cab-d1 .cable-core     { stroke: #5b86d6; } /* explorateur → dossier prof. 1 — bleu */
+.cable.cab-folder .cable-halo, .cable.cab-folder .cable-core { stroke: #e0b15a; } /* dossier → dossier — ambre */
+.cable.cab-file .cable-halo,   .cable.cab-file .cable-core   { stroke: #49c486; } /* fichier → … — vert */
 .cable.cable-default .cable-halo, .cable.cable-default .cable-core { stroke: #8893a7; }
 
 /* --- Anti-collision : ecart/retour anime via transform --- */
@@ -342,8 +345,13 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 
 /* réduire / agrandir : barre de titre seule (corps masqué, hauteur auto). */
 .node-wrap.collapsed { height: auto !important; }
+/* réduit : on masque le corps, on garde la barre de titre (nom du dossier / fichier / branche). */
 .node-wrap.collapsed .gb-detail,
-.node-wrap.collapsed .cmp-filetree { display: none !important; }
+.node-wrap.collapsed .cmp-filetree,
+.node-wrap.collapsed .editor-cm { display: none !important; }
+/* réduit = juste la barre de titre : on resserre la largeur au contenu (dossiers + éditeurs petits). */
+.node-wrap.collapsed[data-kind="fileeditor"] { width: auto !important; min-width: 200px; max-width: 420px; }
+.node-wrap.collapsed[data-kind="folder"] { width: auto !important; min-width: 120px; max-width: 260px; }
 .node-collapse {
   position: absolute; top: -12px; left: -12px; z-index: 6;
   width: 22px; height: 22px; padding: 0; border-radius: 50%;

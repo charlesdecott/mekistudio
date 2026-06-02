@@ -81,10 +81,13 @@
     return 'M ' + pts.map((p) => p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' L ');
   }
 
+  // Couleur du câble selon la RELATION (brique G) : git / explorateur→dossier-de-profondeur-1 /
+  // dossier→dossier / fichier→(n'importe quoi). L'ordre compte (git d'abord, puis fichier).
   function cableClass(kindChild, kindParent) {
-    const pair = kindChild + '>' + kindParent;
-    if (pair === 'fileexplorer>kernel') return 'k2e';
-    if (pair === 'fileeditor>fileexplorer') return 'e2e';
+    if (kindChild === 'gitbranch' || kindParent === 'gitbranch') return 'cab-git';      // câbles de la node branche git
+    if (kindChild === 'fileeditor') return 'cab-file';                                   // tout câble reliant un fichier
+    if (kindChild === 'folder' && kindParent === 'fileexplorer') return 'cab-d1';        // explorateur → dossier profondeur 1
+    if (kindChild === 'folder' && kindParent === 'folder') return 'cab-folder';          // dossier → dossier
     return 'cable-default';
   }
 

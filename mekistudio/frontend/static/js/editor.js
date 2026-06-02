@@ -76,6 +76,8 @@ window.MekiEditor = {
         effects: langComp.reconfigure(languageFor(path)),
       }),
       destroy: () => view.destroy(),
+      // Re-mesure (CodeMirror se mesure mal s'il était display:none — ex. éditeur réduit qu'on agrandit).
+      refresh: () => view.requestMeasure(),
     };
   },
 };

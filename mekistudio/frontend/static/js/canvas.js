@@ -665,7 +665,8 @@ document.addEventListener('alpine:init', () => {
           const r = await fetch('/api/canvas/nodes', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             // F3b : 'ephemeral' = aperçu + TTL ; 'capped' = aperçu sans TTL (plafond FIFO) ; 'unlimited' = permanent.
-            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, source_id: folderId, ephemeral: this._spawnMode !== 'unlimited', expires_at_ms: this._spawnMode === 'ephemeral' ? Date.now() + this._spawnTtlMs : null }),
+            // collapsed:true -> l'éditeur auto-spawné d'un READ naît RÉDUIT (barre de titre = nom du fichier).
+            body: JSON.stringify({ kind: 'fileeditor', x: pos.x, y: pos.y, source_id: folderId, collapsed: true, ephemeral: this._spawnMode !== 'unlimited', expires_at_ms: this._spawnMode === 'ephemeral' ? Date.now() + this._spawnTtlMs : null }),
           });
           if (!r.ok) return;
           node = await r.json();
@@ -1244,7 +1245,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     // --- réduire / agrandir (générique : git + dossier) ---
-    _isCollapsible(node) { return node.kind === 'folder' || node.kind === 'gitbranch'; },
+    _isCollapsible(node) { return node.kind === 'folder' || node.kind === 'gitbranch' || node.kind === 'fileeditor'; },
     makeCollapseToggle(node) {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -1260,6 +1261,11 @@ document.addEventListener('alpine:init', () => {
       node.collapsed = next;
       if (wrap) wrap.classList.toggle('collapsed', next);
       if (btn) { btn.textContent = next ? '▸' : '▾'; btn.title = next ? 'Agrandir' : 'Réduire'; }
+      // éditeur qu'on AGRANDIT : CodeMirror était caché (display:none) -> re-mesure une fois affiché.
+      if (!next && node.kind === 'fileeditor') {
+        const st = this._editors[node.id];
+        if (st && st.handle && st.handle.refresh) requestAnimationFrame(() => st.handle.refresh());
+      }
       this.drawCables(); // la hauteur change (barre de titre seule) -> les câbles suivent
       try {
         await fetch('/api/canvas/nodes/' + node.id, {
@@ -1319,7 +1325,8 @@ document.addEventListener('alpine:init', () => {
         const r = await fetch('/api/canvas/nodes', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           // auto = éphémère (purge si vide) ; sortie à la main = épinglé (permanent).
-          body: JSON.stringify({ kind: 'folder', x: pos.x, y: pos.y, path, ephemeral: !pinned }),
+          // collapsed:true -> les dossiers naissent PETITS (barre = nom) ; l'explorateur racine reste grand.
+          body: JSON.stringify({ kind: 'folder', x: pos.x, y: pos.y, path, collapsed: true, ephemeral: !pinned }),
         });
         if (!r.ok) return null;
         const node = await r.json();
