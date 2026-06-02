@@ -1078,8 +1078,14 @@ document.addEventListener('alpine:init', () => {
         }
       }, 8000);
     },
+    _setEditorName(state) {
+      // affiche juste le NOM du fichier (pas le chemin) -> node plus petite + nom plus grand ;
+      // le chemin complet reste en infobulle (survol).
+      state.nameEl.textContent = state.path ? state.path.split('/').pop() : '(aucun fichier)';
+      state.nameEl.title = state.path || '';
+    },
     async _bootEditor(cmHost, state) {
-      state.nameEl.textContent = state.path || '(aucun fichier)';
+      this._setEditorName(state);
       let content = '';
       if (state.path) {
         try {
@@ -1099,6 +1105,7 @@ document.addEventListener('alpine:init', () => {
         state.path = state.pending.path;
         state.handle.setDoc(state.pending.content, state.pending.path);
         state.pending = null;
+        this._setEditorName(state);
       }
       state.saveBtn.disabled = !state.path;
       this.setDirty(state, false);
