@@ -66,6 +66,7 @@ document.addEventListener('alpine:init', () => {
       // Brique G : au boot on NE re-calcule PAS les positions (on respecte la disposition persistée :
       // chaque node a été placé une fois et n'a plus bougé). On cadre juste la 1re ouverture.
       if (defaultView) this.fitView();
+      this.relayoutZones(); // dispose proprement les zones au chargement (déterministe -> stable au reload)
       this.refreshGit(); // brique G : charge l'état git de la node « branch git »
       // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
       document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
@@ -859,10 +860,9 @@ document.addEventListener('alpine:init', () => {
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
         nodeId = node.id;
-        // les nouveaux nodes (dossiers + éditeur) sont DÉJÀ placés (editorSpawnPos, trou libre) ; on ne
-        // bouge rien d'existant. On (re)dessine les câbles puis on cadre si ça déborde.
-        this.drawCables();
-        this.fitView();
+        // nouveau node ajouté : relaxation des zones (replace sans overlap + range les fichiers),
+        // qui (re)dessine les câbles + cadre. La comète masque ensuite les câbles neufs.
+        this.relayoutZones(); // relaxation : (re)place les zones sans overlap + range les fichiers
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
         // cache les câbles de TOUS les nodes neufs (dossiers + éditeur) : la comète les TRACE en arrivant.
         const svg = this.ensureCablesLayer();
@@ -1336,7 +1336,7 @@ document.addEventListener('alpine:init', () => {
         }
         const world = this.$root.querySelector('.world');
         if (world) world.appendChild(this.renderNode(node));
-        this.drawCables(); this.fitView(); // node déjà placé (editorSpawnPos) ; rien d'existant ne bouge
+        this.relayoutZones(); // relaxation : (re)place les zones sans overlap + range les fichiers
       } finally {
         this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
@@ -1687,8 +1687,7 @@ document.addEventListener('alpine:init', () => {
       for (const w of toRemove) await this._removeFolderNode(w);
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
-      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
+      this.relayoutZones(); // relaxation : (re)place les zones sans overlap + range les fichiers
     },
 
     // Sortie MANUELLE d'un dossier (clic-droit) -> node dossier ÉPINGLÉE (permanente).
@@ -1697,8 +1696,7 @@ document.addEventListener('alpine:init', () => {
       await this._createFolderNode(path, { pinned: true });
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
-      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
+      this.relayoutZones(); // relaxation : (re)place les zones sans overlap + range les fichiers
     },
 
     // Fermeture explicite d'un node dossier (croix). cascade (shift) = ferme aussi les enfants.
@@ -1729,8 +1727,7 @@ document.addEventListener('alpine:init', () => {
       }
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
-      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
+      this.relayoutZones(); // relaxation : (re)place les zones sans overlap + range les fichiers
     },
 
     renderComponent(c, node) {
