@@ -374,6 +374,66 @@ document.addEventListener('alpine:init', () => {
 
     drawCables() { this.drawCablesFrom(this.nodeBoxes()); },
 
+    // Relaxation des node-zones : construit les disques depuis le DOM, résout (répulsion + ressort),
+    // écrit les positions (animées par la transition CSS), range les fichiers via packAround, puis
+    // redessine câbles + territoires. Remplace le placement "place-once".
+    relayoutZones() {
+      const ZL = window.MekiZoneLayout, T = window.MekiTerritories;
+      if (!ZL || !T) return;
+      const nb = this.nodeBoxes();
+      const groups = this.folderBlobCorners(nb); // tuile + fichiers
+      const ctrOf = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+      const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      const zones = [];
+      nb.forEach((info, id) => {
+        if (info.kind !== 'folder') return;
+        const c = ctrOf(info.box);
+        const pts = groups.get(id) || [];
+        let r = Math.max(info.box.w, info.box.h) / 2;
+        for (const p of pts) r = Math.max(r, Math.hypot(p.x - c.x, p.y - c.y));
+        zones.push({ id, parentId: info.source || null, center: c, radius: r + 24, pinned: false });
+      });
+      if (explorer) {
+        const eb = this.boxOf(explorer);
+        zones.push({ id: explorer.dataset.id, parentId: null, center: ctrOf(eb), radius: Math.max(eb.w, eb.h) / 2 + 24, pinned: true });
+      }
+      if (!zones.length) { this.drawCables(); return; }
+      const solved = ZL.solve(zones, { iters: 90, VOID: 60, GAP: 40 });
+      // 1) repositionner chaque tuile dossier sur son nouveau centre
+      const folderCenters = new Map();
+      zones.forEach((z) => {
+        if (z.pinned) { folderCenters.set(z.id, z.center); return; }
+        const w = this.$root.querySelector('.node-wrap[data-id="' + z.id + '"]');
+        if (!w) return;
+        const nc = solved.get(z.id);
+        const nx = Math.round(nc.x - w.offsetWidth / 2), ny = Math.round(nc.y - w.offsetHeight / 2);
+        w.style.left = nx + 'px'; w.style.top = ny + 'px';
+        folderCenters.set(z.id, { x: nx + w.offsetWidth / 2, y: ny + w.offsetHeight / 2 });
+        this._persistPos(z.id, nx, ny);
+      });
+      // 2) ranger les fichiers AUTOUR du centre de leur dossier (ou de l'explorateur)
+      const filesBySource = new Map();
+      this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]').forEach((w) => {
+        const src = w.dataset.source || (explorer && explorer.dataset.id) || '';
+        if (!filesBySource.has(src)) filesBySource.set(src, []);
+        filesBySource.get(src).push(w);
+      });
+      filesBySource.forEach((wraps, src) => {
+        const center = folderCenters.get(src);
+        if (!center) return;
+        const srcW = this.$root.querySelector('.node-wrap[data-id="' + src + '"]');
+        const fsize = { w: srcW ? srcW.offsetWidth : 116, h: srcW ? srcW.offsetHeight : 108 };
+        const sizes = wraps.map((w) => ({ w: w.offsetWidth, h: w.offsetHeight }));
+        const spots = ZL.packAround(center, fsize, sizes, { gap: 18 });
+        wraps.forEach((w, i) => {
+          if (!spots[i]) return;
+          w.style.left = spots[i].x + 'px'; w.style.top = spots[i].y + 'px';
+          this._persistPos(w.dataset.id, spots[i].x, spots[i].y);
+        });
+      });
+      this.drawCables(); this.fitView();
+    },
+
     // Outil suppression : ferme un node FERMABLE en un clic. Fichier -> closeEditor (garde « non
     // sauvegardé »). Dossier -> closeFolderNode (shift = ferme aussi le contenu). Built-in
     // (kernel/git/explorateur/chat) non fermables -> petit flash rouge (feedback).
