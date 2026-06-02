@@ -284,6 +284,23 @@ document.addEventListener('alpine:init', () => {
       // 4a) tracé de chaque câble : CONTOURNEMENT des autres nodes (obstacles gonflés
       // de PAD), masque si boîtes ~confondues (HIDE_DIST).
       const PAD = C.STUB;
+      // bbox de chaque zone (tuile + fichiers) -> obstacle pour les câbles BACKBONE (pas pour les
+      // câbles fichiers, qui vivent DANS leur zone). Évite qu'un câble dossier->dossier traverse une zone tierce.
+      const T = window.MekiTerritories;
+      const zoneBoxes = new Map(); // folderId -> {x,y,w,h}
+      if (T) {
+        const zgroups = this.folderBlobCorners(nodes);
+        zgroups.forEach((pts, fid) => {
+          if (!pts.length) return;
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+          zoneBoxes.set(fid, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        });
+      }
+      const isBackbone = (cab) => {
+        const k = nodes.get(cab.id).kind, pk = nodes.get(cab.parent).kind;
+        return k === 'folder' && (pk === 'folder' || pk === 'fileexplorer');
+      };
       const obstaclesFor = (cab) => {
         const obs = [];
         nodes.forEach((info, oid) => {
@@ -291,6 +308,12 @@ document.addEventListener('alpine:init', () => {
           const o = info.box;
           obs.push({ x: o.x - PAD, y: o.y - PAD, w: o.w + 2 * PAD, h: o.h + 2 * PAD });
         });
+        if (isBackbone(cab)) {
+          zoneBoxes.forEach((zb, fid) => {
+            if (fid === cab.id || fid === cab.parent) return; // pas sa propre zone ni celle du parent
+            obs.push({ x: zb.x - PAD, y: zb.y - PAD, w: zb.w + 2 * PAD, h: zb.h + 2 * PAD });
+          });
+        }
         return obs;
       };
       // état de routage par câble (face + offset) : permet de RE-ROUTER en préservant la face.
