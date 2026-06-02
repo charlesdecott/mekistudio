@@ -118,7 +118,9 @@ async def index(request: Request):
     return _TEMPLATES.TemplateResponse(
         request=request,
         name="canvas.html",
-        context={"project_name": manifest.name},
+        # repo_root (posix) exposé au front : normalise un chemin lu ABSOLU (hook Read Windows)
+        # en chemin RELATIF -> clé de dossier canonique (anti-doublons / anti-purge).
+        context={"project_name": manifest.name, "repo_root": Path(root).resolve().as_posix()},
     )
 
 
@@ -299,7 +301,14 @@ async def open_in_editor(request: Request, node_id: str, body: NodeOpen) -> dict
         )
         if editor is None:
             raise HTTPException(status_code=422, detail="node sans éditeur")
-        editor.file_path = body.path
+        # Normalise en chemin RELATIF posix (défense en profondeur) : un chemin ABSOLU/à
+        # backslashes stocké tel quel casserait le parentage par préfixe (node_effective_path
+        # découpe sur "/") -> l'éditeur serait arraché de sa node dossier qui, devenue vide,
+        # serait purgée. On garantit ici un file_path canonique quoi qu'envoie le client.
+        try:
+            editor.file_path = fs.repo_relpath(root, body.path)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="chemin invalide (hors du repo)")
         bootstrap.save_canvas(root, state)
         return node.model_dump(mode="json")
 

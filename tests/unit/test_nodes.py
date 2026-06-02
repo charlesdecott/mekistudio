@@ -204,6 +204,9 @@ def test_node_effective_path():
     assert node_effective_path(_editor_on("docs/superpowers/x.md")) == "docs/superpowers"
     assert node_effective_path(_editor_on("top.md")) == ""  # fichier à la racine
     assert node_effective_path(_editor_on("")) is None       # pas de fichier ouvert
+    # robustesse : un file_path à BACKSLASHES (vieux canvas.json) reste parsable -> bon dossier
+    # (sinon split("/") n'y verrait qu'un segment -> éditeur orphelin -> purge de sa node dossier).
+    assert node_effective_path(_editor_on("docs\\superpowers\\x.md")) == "docs/superpowers"
 
 
 def test_reconcile_path_aware_chain_and_idempotent():

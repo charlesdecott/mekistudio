@@ -662,9 +662,25 @@ document.addEventListener('alpine:init', () => {
       this.glow(id, intent.level, intent.level === 'soft' ? 600 : 1500);
     },
 
+    // Chemin lu (hook Read = ABSOLU à backslashes sur Windows) -> RELATIF posix au repo.
+    // Indispensable : sans ça la clé front (absolue) ne matche jamais le chemin normalisé du
+    // serveur -> dossiers re-créés à chaque lecture (DOUBLONS) + éditeur arraché de sa node
+    // dossier (purge "le dossier disparaît, il reste le fichier").
+    _repoRel(p) {
+      const I = window.MekiImpulses;
+      return (I && I.toRepoRel) ? I.toRepoRel(p, window.__REPO_ROOT__ || '') : (p || '');
+    },
+
     // --- F3a : auto-spawn d'un éditeur éphémère pour un fichier lu mais non ouvert ---
-    async spawnEphemeralEditor(path) {
+    async spawnEphemeralEditor(rawPath) {
+      const path = this._repoRel(rawPath);                  // NORMALISE en TOUT PREMIER (clé canonique)
       if (!path || this._spawning[path]) return;            // rafale du même fichier -> 1 seul spawn
+      // hors-repo (reste absolu après normalisation) : aucun node fichier -> comète vers l'explorateur
+      if (window.MekiImpulses && window.MekiImpulses.isAbsPath(path)) {
+        const cId = this.kindId('chat'), exId = this.kindId('fileexplorer');
+        if (cId && exId) this.pulseTo(cId, exId, 'soft');
+        return;
+      }
       const existing = this.editorIdForFile(path);
       if (existing) {                                       // dedup : déjà ouvert -> comète + ré-arme TTL
         const chatId = this.kindId('chat');

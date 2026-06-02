@@ -2,6 +2,38 @@ const test = require('node:test');
 const assert = require('node:assert');
 const MekiImpulses = require('./chat-impulses.js');
 
+test('isAbsPath : Windows / posix / UNC absolus, relatifs non', () => {
+  assert.equal(MekiImpulses.isAbsPath('C:\\mekistudio\\a.py'), true);
+  assert.equal(MekiImpulses.isAbsPath('C:/mekistudio/a.py'), true);
+  assert.equal(MekiImpulses.isAbsPath('/home/x/a.py'), true);
+  assert.equal(MekiImpulses.isAbsPath('//srv/share/a.py'), true);
+  assert.equal(MekiImpulses.isAbsPath('pkg/a/a.py'), false);
+  assert.equal(MekiImpulses.isAbsPath('a.py'), false);
+});
+
+test('toRepoRel : chemin ABSOLU Windows -> relatif posix au repo (cœur du fix doublons)', () => {
+  const root = 'C:\\mekistudio';
+  assert.equal(MekiImpulses.toRepoRel('C:\\mekistudio\\pkg\\a\\file.py', root), 'pkg/a/file.py');
+  assert.equal(MekiImpulses.toRepoRel('C:/mekistudio/pkg/a/file.py', root), 'pkg/a/file.py');
+  // casse différente du préfixe racine (Windows insensible à la casse)
+  assert.equal(MekiImpulses.toRepoRel('c:\\MekiStudio\\pkg\\a.py', root), 'pkg/a.py');
+  // la racine elle-même -> ""
+  assert.equal(MekiImpulses.toRepoRel('C:\\mekistudio', root), '');
+});
+
+test('toRepoRel : collapse les / multiples (parité serveur repo_relpath)', () => {
+  // sans collapse, la clé front "pkg//a/f.py" ≠ clé serveur "pkg/a/f.py" -> doublons
+  assert.equal(MekiImpulses.toRepoRel('C://mekistudio//pkg//a//f.py', 'C://mekistudio'), 'pkg/a/f.py');
+  assert.equal(MekiImpulses.toRepoRel('pkg//a//f.py', 'C:/mekistudio'), 'pkg/a/f.py');
+});
+
+test('toRepoRel : déjà relatif -> normalisé (no-op), hors-repo -> renvoyé tel quel', () => {
+  assert.equal(MekiImpulses.toRepoRel('pkg/a/file.py', 'C:\\mekistudio'), 'pkg/a/file.py');
+  assert.equal(MekiImpulses.toRepoRel('./pkg/a/file.py', 'C:\\mekistudio'), 'pkg/a/file.py');
+  assert.equal(MekiImpulses.toRepoRel('D:\\autre\\x.py', 'C:\\mekistudio'), 'D:/autre/x.py'); // hors-repo : reste absolu
+  assert.equal(MekiImpulses.toRepoRel('a.py', ''), 'a.py'); // racine inconnue -> best-effort
+});
+
 test('tool_result Read réussi -> comète vers le fichier (fallback COMÈTE vers explorateur)', () => {
   const i = MekiImpulses.impulseFor({ type: 'tool_result', is_error: false, name: 'Read', file_path: 'a.py' });
   assert.equal(i.kind, 'comet');

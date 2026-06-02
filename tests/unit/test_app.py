@@ -499,6 +499,33 @@ def test_get_canvas_keeps_pinned_empty_folder(tmp_path):
     assert pinned["id"] in ids  # épinglé -> conservé même vide
 
 
+def test_open_normalizes_absolute_path_keeps_folder(tmp_path):
+    # Régression Windows : le hook Read fournit un chemin ABSOLU (à backslashes). Envoyé brut à
+    # /open, node_effective_path (découpe sur "/") n'y trouve aucun dossier -> l'éditeur est
+    # arraché vers l'explorateur, sa node dossier devient vide et est PURGÉE ("le dossier
+    # disparaît, il reste le fichier"). /open doit normaliser en relatif posix.
+    from mekistudio.backend.components import EditorComponent, iter_components
+    from mekistudio.backend.models import Node
+
+    (tmp_path / "pkg" / "a").mkdir(parents=True)
+    (tmp_path / "pkg" / "a" / "f.py").write_text("x")
+    client = _client(tmp_path)
+    folder = _mk_folder(client, "pkg/a", ephemeral=True)
+    ed = client.post(
+        "/api/canvas/nodes",
+        json={"kind": "fileeditor", "x": 5, "y": 5, "ephemeral": True, "source_id": folder["id"]},
+    ).json()
+    abs_path = str(tmp_path / "pkg" / "a" / "f.py")  # ABSOLU (backslashes sur Windows)
+    opened = client.post(f"/api/canvas/nodes/{ed['id']}/open", json={"path": abs_path}).json()
+    # file_path stocké en RELATIF posix (et non le chemin absolu brut)
+    comp = next(c for c in iter_components(Node.model_validate(opened).root) if isinstance(c, EditorComponent))
+    assert comp.file_path == "pkg/a/f.py"
+    # après GET (reconcile + purge), l'éditeur pointe SA node dossier et le dossier SURVIT
+    nodes = client.get("/api/canvas").json()["nodes"]
+    assert folder["id"] in {n["id"] for n in nodes}
+    assert next(n for n in nodes if n["id"] == ed["id"])["source_id"] == folder["id"]
+
+
 def test_create_folder_rejects_traversal_and_absolute(tmp_path):
     client = _client(tmp_path)
     assert client.post("/api/canvas/nodes", json={"kind": "folder", "x": 1, "y": 1, "path": "../../etc"}).status_code == 422

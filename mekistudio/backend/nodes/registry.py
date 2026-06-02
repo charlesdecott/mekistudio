@@ -63,7 +63,10 @@ def node_effective_path(node: Node) -> str | None:
         )
         if editor is None or not editor.file_path:
             return None
-        segs = [p for p in editor.file_path.split("/") if p]
+        # Robustesse : on tolère un file_path à backslashes (vieux canvas.json, ou chemin non
+        # normalisé qui aurait échappé à /open) — sinon split("/") n'y verrait qu'un segment et
+        # l'éditeur serait arraché de sa node dossier (qui, vide, serait purgée).
+        segs = [p for p in editor.file_path.replace("\\", "/").split("/") if p]
         return "/".join(segs[:-1])  # dossier du fichier ("" si à la racine)
     return None
 

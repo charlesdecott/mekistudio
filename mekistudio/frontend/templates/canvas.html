@@ -6,6 +6,9 @@
   <title>{{ project_name }} — mekistudio</title>
   <link rel="stylesheet" href="/static/css/canvas.css">
   <script>window.__PROJECT_NAME__ = {{ project_name | tojson }};</script>
+  <!-- racine du repo (posix) : permet de normaliser un chemin lu ABSOLU (hook Read Windows)
+       en chemin RELATIF posix -> clé de dossier canonique (anti-doublons). -->
+  <script>window.__REPO_ROOT__ = {{ repo_root | tojson }};</script>
   <!-- canvas.js AVANT Alpine : il enregistre le composant sur `alpine:init`,
        qui doit être écouté avant qu'Alpine ne démarre. -->
   <!-- géométries pures (window.MekiCables / MekiCollision) — avant canvas.js qui les utilise. -->

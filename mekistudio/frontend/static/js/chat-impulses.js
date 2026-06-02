@@ -13,7 +13,27 @@
 
   // Match d'un fichier d'editeur (chemin RELATIF repo) avec un chemin lu (relatif, ./, ou ABSOLU) :
   // egalite, sinon le chemin lu finit-il par les SEGMENTS du chemin editeur (suffixe). Pur.
-  function _norm(p) { return (p || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, ''); }
+  // backslash -> /, COLLAPSE des / multiples (parité avec fs.repo_relpath côté serveur : sans ça
+  // un chemin "a//b" divergerait -> clé front ≠ clé serveur -> doublons), strip "./" et / final.
+  function _norm(p) { return (p || '').replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^\.\//, '').replace(/\/+$/, ''); }
+
+  // Un chemin est-il ABSOLU ? (lecteur Windows "C:/...", racine posix "/...", UNC "//...").
+  function isAbsPath(p) { return /^([a-zA-Z]:|\/)/.test(_norm(p)); }
+
+  // Normalise un chemin lu (relatif, ./, ou ABSOLU Windows) en chemin RELATIF posix au repo.
+  // Sur Windows le hook Read renvoie un chemin absolu à backslashes : sans cette normalisation,
+  // la clé front (absolue) ne matche jamais le chemin normalisé du serveur -> dossiers re-créés
+  // à chaque lecture (DOUBLONS) + éditeur arraché de sa node dossier (purge). Préfixe racine
+  // comparé SANS la casse (Windows), suffixe conservé tel quel. Pur, testé `node --test`.
+  function toRepoRel(path, root) {
+    const p = _norm(path), r = _norm(root);
+    if (!r) return p;
+    const pl = p.toLowerCase(), rl = r.toLowerCase();
+    if (pl === rl) return '';
+    if (pl.startsWith(rl + '/')) return p.slice(r.length + 1);
+    return p; // déjà relatif, ou hors-repo (best-effort : l'appelant gère l'absolu restant)
+  }
+
   function fileMatch(editorFile, readPath) {
     const have = _norm(editorFile), want = _norm(readPath);
     if (!have || !want) return false;
@@ -54,7 +74,7 @@
     }
   }
 
-  const MekiImpulses = { impulseFor, fileMatch };
+  const MekiImpulses = { impulseFor, fileMatch, toRepoRel, isAbsPath };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiImpulses;
   if (typeof window !== 'undefined') root.MekiImpulses = MekiImpulses;
 })(typeof window !== 'undefined' ? window : globalThis);
