@@ -67,8 +67,9 @@
         const fs = fileSizes[idx];
         const box = { x: folderCenter.x + Math.cos(ang) * radius - fs.w / 2, y: folderCenter.y + Math.sin(ang) * radius - fs.h / 2, w: fs.w, h: fs.h };
         if (placed.some((p) => hit(p, box))) continue; // créneau pris -> suivant
-        out.push({ x: Math.round(box.x), y: Math.round(box.y) });
-        placed.push(box); idx++;
+        const rb = { x: Math.round(box.x), y: Math.round(box.y), w: fs.w, h: fs.h };
+        out.push({ x: rb.x, y: rb.y });
+        placed.push(rb); idx++;
       }
     }
     return out;
@@ -77,13 +78,14 @@
   // Angle (radians) du MILIEU du plus grand secteur angulaire libre autour d'un centre, étant
   // donné les angles déjà occupés par les voisins. Sert à initialiser une NOUVELLE zone "vers le vide".
   function freestAngle(occupied) {
+    // occupied: angles en radians dans [0, 2π).
     if (!occupied || !occupied.length) return 0;
     if (occupied.length === 1) return occupied[0] + Math.PI;
     const s = occupied.slice().sort((a, b) => a - b);
-    let best = s[0] + Math.PI, gap = -1;
+    let best = s[0] + Math.PI, bestSector = -1;
     for (let i = 0; i < s.length; i++) {
       const a0 = s[i], a1 = i + 1 < s.length ? s[i + 1] : s[0] + Math.PI * 2;
-      if (a1 - a0 > gap) { gap = a1 - a0; best = a0 + (a1 - a0) / 2; }
+      if (a1 - a0 > bestSector) { bestSector = a1 - a0; best = a0 + (a1 - a0) / 2; }
     }
     return best;
   }

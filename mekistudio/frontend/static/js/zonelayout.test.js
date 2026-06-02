@@ -23,15 +23,16 @@ test('solve : une zone pinned ne bouge pas', () => {
   assert.deepEqual(pos.get('root'), { x: 0, y: 0 });
 });
 
-test('solve : un enfant est tiré vers la distance-repos de son parent', () => {
+test('solve : un enfant converge vers la distance-repos quand le ressort domine (VOID < repos)', () => {
   const zones = [
     { id: 'p', parentId: null, center: { x: 0, y: 0 }, radius: 60, pinned: true },
     { id: 'c', parentId: 'p', center: { x: 400, y: 0 }, radius: 40, pinned: false },
   ];
-  const pos = Z.solve(zones, { iters: 200, VOID: 60, GAP: 40 });
-  const rest = 60 + 40 + 40;
-  const d = dist(pos.get('p'), pos.get('c'));
-  assert.ok(Math.abs(d - rest) < 25, 'distance ~ repos (' + rest + '), obtenu ' + d.toFixed(1));
+  // repos ressort = 60+40+GAP(40) = 140 ; min répulsion = 60+40+VOID(10) = 110 < 140 -> le ressort gagne
+  const pos = Z.solve(zones, { iters: 400, VOID: 10, GAP: 40 });
+  const rest = 60 + 40 + 40; // 140
+  const d = Math.hypot(pos.get('c').x - pos.get('p').x, pos.get('c').y - pos.get('p').y);
+  assert.ok(Math.abs(d - rest) < 8, 'distance ~ repos (' + rest + '), obtenu ' + d.toFixed(1));
 });
 
 test('solve : déterministe (mêmes entrées -> mêmes sorties)', () => {
@@ -65,6 +66,11 @@ test('packAround : aucun fichier ne chevauche la tuile ni un autre fichier', () 
   for (let i = 0; i < boxes.length; i++) {
     assert.ok(!hit(boxes[i], folderBox), 'fichier ' + i + ' ne touche pas la tuile');
     for (let j = i + 1; j < boxes.length; j++) assert.ok(!hit(boxes[i], boxes[j]), 'fichiers ' + i + '/' + j + ' disjoints');
+  }
+  const sep = (a, b) => Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w), b.y - (a.y + a.h), a.y - (b.y + b.h));
+  for (let i = 0; i < boxes.length; i++) {
+    assert.ok(sep(boxes[i], folderBox) >= 18 - 1, 'fichier ' + i + ' à >= gap de la tuile');
+    for (let j = i + 1; j < boxes.length; j++) assert.ok(sep(boxes[i], boxes[j]) >= 18 - 1, 'fichiers ' + i + '/' + j + ' à >= gap');
   }
 });
 
