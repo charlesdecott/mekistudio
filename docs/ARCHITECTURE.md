@@ -87,6 +87,11 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   complète = union des ancêtres ; compacte = fusion des dossiers à enfant unique, split au branchement).
 - **`static/js/git-node.js`** — rendu **pur** de la node git (`window.MekiGitNode`, testé `node --test`) :
   `fmtTitle`/`fmtDetail` (⎇ branche · ↑ahead ↓behind · ● modifs), `render(el, info)`.
+- **`static/js/zonelayout.js`** — géométrie **pure** de placement (`window.MekiZoneLayout`, testé
+  `node --test`, brique G) : `radialLayout` (arbre RADIAL : racine au centre, dossiers en rayons vers
+  l'extérieur — chaîne droite, fourche en cône ; enfants triés par `sortKey`=chemin → reproductible),
+  `packAround` (range les fichiers en ANNEAU autour de la tuile 📁), `freestAngle`, et `solve`/
+  `packOutward` (réserve, non câblés). La dé-collision est dans `territories.js` (`separatePolys`, MTV).
 - **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
   `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
   `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
@@ -112,11 +117,18 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   non destructive (`closeFolderNode`, enfants rebranchés au grand-parent ; shift = cascade).
   **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier).
   **Node git** : `refreshGit` (charge `/api/git/branch` au boot et sur `meki:turn-end`).
-  **Placement organique INCRÉMENTAL** : `editorSpawnPos(anchorWrap)` pose **chaque nouveau node une
-  seule fois** dans un trou libre près de son parent, en croissant **vers l'extérieur** (dendrite,
-  direction déterministe), câble dégagé (et pas sous un câble existant). Les nodes **existants ne
-  bougent jamais** (pas de re-layout global → pas de clignotement) ; `fitView` **auto-zoome** seulement
-  si ça déborde (tout voir). **Comète qui matérialise les dossiers** : à l'auto-spawn, les nouveaux
+  **Placement par ARBRE RADIAL (node-zones)** : chaque dossier est une *node-zone* (tuile 📁 au centre,
+  fichiers directs en ANNEAU via `packAround`, `folderBlobCorners` inclut la tuile). `relayoutZones`
+  (re)dispose tout à chaque changement : (1) `_reconcileFileParents` rattache chaque fichier à son
+  dossier le plus profond (MÊME règle que `reconcile_source_links` serveur → bonne zone + cohérence
+  live/reload) ; (2) `MekiZoneLayout.radialLayout` (explorateur racine épinglée ancrée sur son HAUT
+  stable, dossiers en rayons) ; (3) `packAround` avec une taille de fichier CANONIQUE (indépendante de
+  la mesure live instable) ; (4) `MekiTerritories.separatePolys` (MTV) garantit le VIDE entre blobs
+  dessinés. **Déterministe → 0 chevauchement + stable au reload** ; mouvement animé (transition CSS),
+  deadband anti-jitter. `editorSpawnPos(anchorWrap)` ne sert qu'à l'init d'un nouveau node.
+  Les câbles backbone (bleu/ambre) **contournent les zones tierces** ; les câbles fichiers
+  (vert) restent courts dans leur zone. `fitView` **auto-zoome** seulement si ça déborde (tout voir).
+  **Comète qui matérialise les dossiers** : à l'auto-spawn, les nouveaux
   dossiers naissent invisibles (`_materializingDepth`/`spawning`) et `pulseTo` les **révèle + trace leur
   câble** le long du chemin (comme les fichiers ; spawn entièrement en try/finally → jamais bloqué invisible).
 - **`static/js/editor.js`** — module ESM **CodeMirror 6** (depuis esm.sh) : expose
@@ -141,8 +153,10 @@ Dépendances réseau externes (assumées) : Alpine (unpkg), CodeMirror (esm.sh).
   (explorateur ∪ dossiers) au **plus long préfixe de chemin** ; le reste par kind. `reconcile_source_links`
   est la source de vérité (idempotent, déterministe) — un node dossier supprimé voit ses enfants
   rebranchés automatiquement au reload.
-- **Zéro-recouvrement** des nodes maintenu (collision douce au move/resize/spawn + réconciliation
-  au boot) ; le `kernel` (`movable:false`) fait office de **mur**.
+- **Zéro-recouvrement** des zones maintenu : dé-collision par polygones `MekiTerritories.separatePolys`
+  (MTV, VIDE garanti entre blobs dessinés) + collision douce au move/resize/spawn + réconciliation au boot ; le
+  `kernel` (`movable:false`) fait office de **mur**. Les nodes **se ré-arrangent en douceur** (animé,
+  transition CSS) — jamais de saut/clignotement.
 
 ## Recette : ajouter un node
 

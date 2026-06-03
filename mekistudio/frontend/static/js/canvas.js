@@ -62,10 +62,10 @@ document.addEventListener('alpine:init', () => {
       this.reconcileOverlaps();   // sépare les nodes hérités qui se chevauchent (zéro recouvrement)
       // Au tout premier affichage (vue par défaut), on centre sur le kernel.
       if (defaultView) this.centerOnKernel(nodes);
-      this.drawCables(); // câbles initiaux (le layer SVG est créé ici, après les wraps)
-      // Brique G : au boot on NE re-calcule PAS les positions (on respecte la disposition persistée :
-      // chaque node a été placé une fois et n'a plus bougé). On cadre juste la 1re ouverture.
-      if (defaultView) this.fitView();
+      // Brique G : relayoutZones dispose les zones au boot (déterministe -> stable au reload) ; il
+      // (re)dessine les câbles ET cadre la vue en fin. Un layout déjà convergé ne persiste rien
+      // (skip-if-unchanged) -> aucun POST au reload. Crée aussi le layer SVG (après les wraps).
+      this.relayoutZones();
       this.refreshGit(); // brique G : charge l'état git de la node « branch git »
       // Brique F : reçoit les intentions d'impulsion dispatched depuis chat-view.js
       document.addEventListener('meki:impulse', (e) => this.applyIntent(e.detail));
@@ -164,6 +164,73 @@ document.addEventListener('alpine:init', () => {
       return svg;
     },
 
+    // Layer SVG des « territoires » de dossier, TOUT premier enfant de .world (sous les câbles).
+    ensureTerritoriesLayer() {
+      const world = this.$root.querySelector('.world');
+      if (!world) return null;
+      let svg = world.querySelector('svg.territories');
+      if (!svg) {
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'territories');
+      }
+      if (world.firstChild !== svg) world.insertBefore(svg, world.firstChild);
+      return svg;
+    },
+
+    // Teinte stable (hue) d'un dossier dérivée de son chemin -> chaque territoire a sa couleur.
+    _folderHue(path) {
+      let h = 0;
+      for (let i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) % 360;
+      return h;
+    },
+
+    // Coins définissant la ZONE de chaque dossier : SA PROPRE TUILE (centre de la zone) + ses
+    // FICHIERS DIRECTS. Le dossier est ainsi AU CENTRE de son blob, pas dans le vide. Les
+    // sous-dossiers ont chacun leur zone séparée (vide entre zones de niveaux différents).
+    // Map id dossier -> [points].
+    folderBlobCorners(nodes) {
+      const T = window.MekiTerritories;
+      const groups = new Map();
+      // La zone d'un dossier inclut désormais SA PROPRE tuile (centre de la zone) + ses fichiers directs.
+      nodes.forEach((info, id) => {
+        if (info.kind !== 'folder') return;
+        groups.set(id, T.boxCorners(info.box).slice()); // la tuile dossier amorce le hull
+      });
+      nodes.forEach((info) => {
+        const pid = info.source;
+        if (info.kind !== 'fileeditor' || !pid || !groups.has(pid)) return; // FICHIERS directs uniquement
+        for (const p of T.boxCorners(info.box)) groups.get(pid).push(p);
+      });
+      return groups;
+    },
+
+    // Trace un blob arrondi par dossier autour de sa ZONE (cf. folderBlobCorners). DOM impératif.
+    drawFolderTerritories(nodes) {
+      const svg = this.ensureTerritoriesLayer();
+      const T = window.MekiTerritories;
+      if (!svg || !T) return;
+      const groups = this.folderBlobCorners(nodes);
+      const seen = new Set();
+      groups.forEach((pts, id) => {
+        const d = pts.length ? T.roundedHullPath(pts, 14) : ''; // pad de dessin du blob (cf. ZONE_DRAW_PAD dans relayoutZones)
+        if (!d) return;
+        seen.add(id);
+        let p = svg.querySelector('path[data-terri="' + id + '"]');
+        if (!p) {
+          p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          p.dataset.terri = id; p.setAttribute('class', 'terri');
+          svg.appendChild(p);
+        }
+        // teinte stable depuis le chemin du dossier (data-folder sur le wrap)
+        const wrap = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
+        const hue = this._folderHue((wrap && wrap.dataset.folder) || id);
+        p.setAttribute('d', d);
+        p.setAttribute('fill', 'hsla(' + hue + ', 50%, 52%, 0.16)');
+        p.setAttribute('stroke', 'hsla(' + hue + ', 60%, 62%, 0.7)');
+      });
+      svg.querySelectorAll('path[data-terri]').forEach((p) => { if (!seen.has(p.dataset.terri)) p.remove(); });
+    },
+
     // Lit les boîtes de tous les nodes depuis le DOM : Map id -> {box, kind, source}.
     nodeBoxes() {
       const map = new Map();
@@ -217,6 +284,23 @@ document.addEventListener('alpine:init', () => {
       // 4a) tracé de chaque câble : CONTOURNEMENT des autres nodes (obstacles gonflés
       // de PAD), masque si boîtes ~confondues (HIDE_DIST).
       const PAD = C.STUB;
+      // bbox de chaque zone (tuile + fichiers) -> obstacle pour les câbles BACKBONE (pas pour les
+      // câbles fichiers, qui vivent DANS leur zone). Évite qu'un câble dossier->dossier traverse une zone tierce.
+      const T = window.MekiTerritories;
+      const zoneBoxes = new Map(); // folderId -> {x,y,w,h}
+      if (T) {
+        const zgroups = this.folderBlobCorners(nodes);
+        zgroups.forEach((pts, fid) => {
+          if (!pts.length) return;
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+          zoneBoxes.set(fid, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+        });
+      }
+      const isBackbone = (cab) => {
+        const k = nodes.get(cab.id).kind, pk = nodes.get(cab.parent).kind;
+        return k === 'folder' && (pk === 'folder' || pk === 'fileexplorer');
+      };
       const obstaclesFor = (cab) => {
         const obs = [];
         nodes.forEach((info, oid) => {
@@ -224,6 +308,12 @@ document.addEventListener('alpine:init', () => {
           const o = info.box;
           obs.push({ x: o.x - PAD, y: o.y - PAD, w: o.w + 2 * PAD, h: o.h + 2 * PAD });
         });
+        if (isBackbone(cab)) {
+          zoneBoxes.forEach((zb, fid) => {
+            if (fid === cab.id || fid === cab.parent) return; // pas sa propre zone ni celle du parent
+            obs.push({ x: zb.x - PAD, y: zb.y - PAD, w: zb.w + 2 * PAD, h: zb.h + 2 * PAD });
+          });
+        }
         return obs;
       };
       // état de routage par câble (face + offset) : permet de RE-ROUTER en préservant la face.
@@ -301,9 +391,136 @@ document.addEventListener('alpine:init', () => {
       svg.querySelectorAll('g[data-edge]').forEach((g) => {
         if (!seen.has(g.dataset.edge)) g.remove();
       });
+      // 6) territoires de dossier (blobs sous les câbles), recalculés en phase
+      this.drawFolderTerritories(nodes);
     },
 
     drawCables() { this.drawCablesFrom(this.nodeBoxes()); },
+
+    // Relaxation des node-zones : construit les disques depuis le DOM, résout en RÉPULSION SEULE
+    // (spring:0) à partir des positions courantes — anti-overlap uniquement. La répulsion est un VRAI
+    // point fixe quand les zones sont séparées : un layout déjà séparé (persisté) ne bouge plus au
+    // reload (stable, RELOAD_MAX_DELTA ~0) et un ajout ne pousse QUE ce qui chevauche (mouvement
+    // minimal, aucun reshuffle). La proximité parent (câble court) vient de l'init DIRECTIONNELLE
+    // d'editorSpawnPos/freestAngle, PAS d'un ressort (qui briserait la stabilité : rotation libre +
+    // non-convergence -> autre équilibre à chaque solve). Puis range les fichiers via packAround,
+    // écrit les positions (animées par la transition CSS), redessine câbles + territoires.
+    // Reconcile FRONT du parentage fichier->dossier : sous spawns concurrents, un fichier peut naître
+    // AVANT sa node dossier et se rattacher à l'explorateur ; il apparaît alors HORS de la zone de son
+    // dossier (et le serveur le rerattache au reload -> reshuffle). On applique ici la MÊME règle que
+    // le serveur (plus-long-préfixe de chemin) : chaque fichier pointe vers son dossier le plus profond.
+    _reconcileFileParents() {
+      const F = window.MekiFolders;
+      this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]').forEach((w) => {
+        const file = w.dataset.file; if (!file || !F) return;
+        const host = this._findFolderForPath(file) || this._nearestFolderAnchor(F.dirOf(file));
+        const hid = host ? host.dataset.id : '';
+        // data-source synchrone -> le regroupement qui suit voit le bon parent. Pas besoin de persister :
+        // le serveur applique la MÊME règle (reconcile_source_links) au boot -> live == reload (pas de reshuffle).
+        if (hid && hid !== w.dataset.source) w.dataset.source = hid;
+      });
+    },
+    relayoutZones() {
+      const ZL = window.MekiZoneLayout, T = window.MekiTerritories;
+      if (!ZL || !T) return; // T requis par folderBlobCorners
+      this._reconcileFileParents();      // fichiers rattachés à leur dossier le plus profond AVANT le regroupement
+      const nb = this.nodeBoxes();
+      const ctrOf = (b) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+      const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
+      const GAP = 14;       // petit vide entre une zone et la suivante (folders rapprochés)
+      const PACKGAP = 10;   // espacement des fichiers DANS la zone (anneau autour de la tuile)
+      const CONE = 0.6;     // demi-angle d'éventail d'une fourche de l'arbre radial
+      const DEAD = 8;       // deadband : un déplacement < DEAD px = bruit -> on ne bouge pas (pas de jitter/POST au reload)
+      // 1) fichiers groupés par dossier, TRIÉS par chemin -> packing déterministe (identique au reload).
+      const filesBySource = new Map();
+      this.$root.querySelectorAll('.node-wrap[data-kind="fileeditor"]').forEach((w) => {
+        const src = w.dataset.source || (explorer && explorer.dataset.id) || '';
+        if (!filesBySource.has(src)) filesBySource.set(src, []);
+        filesBySource.get(src).push(w);
+      });
+      // tri par NOM DE FICHIER (basename) : stable quel que soit le format du chemin (absolu en live vs
+      // relatif au reload) -> ordre de packing identique -> mêmes slots d'anneau -> stable au reload.
+      const baseName = (w) => (w.dataset.file || '').split(/[\\/]/).pop();
+      filesBySource.forEach((list) => list.sort((a, b) => baseName(a).localeCompare(baseName(b)) || (a.dataset.id < b.dataset.id ? -1 : 1)));
+      // 2) par dossier : spots des fichiers en ANNEAU autour de la tuile (relatifs au centre) + rayon de
+      //    zone DÉTERMINISTE (englobe tuile + anneau). Indépendant des positions courantes -> stable au reload.
+      const cornersAt = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
+      // taille CANONIQUE d'un éditeur réduit : le packing ne doit PAS dépendre de la taille mesurée en
+      // direct (instable : l'éditeur n'est pas encore stabilisé/réduit au 1er relayout d'une rafale ->
+      // anneau différent persisté -> dérive au reload). Sizes fixes -> layout = f(topologie) -> stable.
+      const FILE = { w: 260, h: 66 };
+      const ringFor = (fsize, wraps) => {
+        const sizes = wraps.map(() => FILE);
+        const spots = ZL.packAround({ x: 0, y: 0 }, fsize, sizes, { gap: PACKGAP }); // top-left RELATIFS au centre
+        let r = 0;
+        for (const c of cornersAt(-fsize.w / 2, -fsize.h / 2, fsize.w, fsize.h)) r = Math.max(r, Math.hypot(c.x, c.y));
+        spots.forEach((s, i) => { for (const c of cornersAt(s.x, s.y, sizes[i].w, sizes[i].h)) r = Math.max(r, Math.hypot(c.x, c.y)); });
+        return { spots, wraps, radius: r + 6 };
+      };
+      const zinfo = new Map(); // folderId -> { spots, wraps, radius }
+      nb.forEach((info, id) => { if (info.kind === 'folder') zinfo.set(id, ringFor({ w: info.box.w, h: info.box.h }, filesBySource.get(id) || [])); });
+      // chemin de chaque dossier -> sortKey reproductible (indépendant des ids générés au spawn).
+      const folderPath = new Map();
+      this.$root.querySelectorAll('.node-wrap[data-kind="folder"]').forEach((w) => folderPath.set(w.dataset.id, w.dataset.folder || ''));
+      // 3) zones pour le radial (rayon = zone anneau complète). Explorateur = racine épinglée.
+      const zones = [];
+      nb.forEach((info, id) => { if (info.kind === 'folder') zones.push({ id, parentId: info.source || null, center: ctrOf(info.box), radius: (zinfo.get(id) || { radius: 60 }).radius, pinned: false, sortKey: folderPath.get(id) || id }); });
+      let exId = '';
+      // ancre radiale = HAUT-CENTRE de l'explorateur (x-centre + bord haut) : stable même quand la hauteur
+      // de l'arbre varie (lignes fs-claimed masquées) -> radial déterministe -> stable au reload.
+      if (explorer) { exId = explorer.dataset.id; const eb = this.boxOf(explorer); zinfo.set(exId, ringFor({ w: eb.w, h: eb.h }, filesBySource.get(exId) || [])); zones.push({ id: exId, parentId: null, center: { x: eb.x + eb.w / 2, y: eb.y }, radius: eb.w / 2 + 8, pinned: true }); }
+      if (!zones.length) { this.drawCables(); this.fitView(); return; }
+      // 4) arbre RADIAL orienté (déterministe) -> centres provisoires.
+      const radial = ZL.radialLayout(zones, { gap: GAP, cone: CONE });
+      const centerOf = new Map();
+      zones.forEach((z) => { const p = z.pinned ? z.center : (radial.get(z.id) || z.center); centerOf.set(z.id, { x: p.x, y: p.y }); });
+      // 5) CIBLES en mémoire : tuile + ANNEAU de fichiers (relatifs au centre) + polygone englobant par zone.
+      const corners = (x, y, w, h) => cornersAt(x, y, w, h);
+      const targets = []; // {id, items:[{w,x,y}], poly, pinned}
+      zones.forEach((z) => {
+        const w = this.$root.querySelector('.node-wrap[data-id="' + z.id + '"]');
+        if (!w) return;
+        const c = centerOf.get(z.id);
+        const tl = { w, x: Math.round(c.x - w.offsetWidth / 2), y: Math.round(c.y - w.offsetHeight / 2) };
+        const items = [tl];
+        let pts = corners(tl.x, tl.y, w.offsetWidth, w.offsetHeight);
+        const zi = zinfo.get(z.id);
+        if (zi) zi.wraps.forEach((fw, i) => {
+          const sp = zi.spots[i]; if (!sp) return;
+          const it = { w: fw, x: Math.round(c.x + sp.x), y: Math.round(c.y + sp.y) };
+          items.push(it); pts = pts.concat(corners(it.x, it.y, FILE.w, FILE.h)); // hull = taille CANONIQUE -> séparation stable
+        });
+        targets.push({ id: z.id, items, poly: T.convexHull(pts), pinned: z.pinned });
+      });
+      // 5) dé-collision PAR POLYGONES (zones allongées) : on sépare les HULLS d'au moins 2×(pad de
+      //    dessin du blob) + GAP, pour que les BLOBS DESSINÉS (chacun dilaté de 14) gardent un vide GAP.
+      const ZONE_DRAW_PAD = 14;
+      // marge = 2× pad de dessin + GAP + marge de DÉBORDEMENT du lissage Catmull (le blob arrondi peut
+      // dépasser un peu le hull dilaté). Garantit un vide réel entre les BLOBS DESSINÉS.
+      const sep = T.separatePolys(targets.map((t) => ({ id: t.id, poly: t.poly, pinned: t.pinned })), { pad: 2 * ZONE_DRAW_PAD + GAP + 16, iters: 160 });
+      // 6) appliquer : chaque zone translatée de son offset (tuile + fichiers d'un bloc), deadband.
+      const place = (w, nx, ny) => {
+        this.clearTranslate(w);
+        const ox = parseFloat(w.style.left) || 0, oy = parseFloat(w.style.top) || 0;
+        if (Math.hypot(nx - ox, ny - oy) > DEAD) { w.style.left = nx + 'px'; w.style.top = ny + 'px'; this._persistPos(w.dataset.id, nx, ny); }
+      };
+      targets.forEach((t) => {
+        const o = sep.get(t.id) || { x: 0, y: 0 };
+        t.items.forEach((it, idx) => {
+          if (t.pinned && idx === 0) return; // ne pas déplacer la tuile explorateur (pinned)
+          place(it.w, it.x + o.x, it.y + o.y);
+        });
+      });
+      this.drawCables(); this.fitView();
+    },
+
+    // Coaléscer les relayouts d'une RAFALE de spawns (applyIntent n'await pas -> spawns concurrents) en
+    // UN seul passage sur l'ensemble complet : l'état persisté est convergé (pas de snap au 1er reload)
+    // et on n'émet qu'un seul lot de POST. Boot appelle relayoutZones() directement (pas une rafale).
+    _scheduleRelayout() {
+      clearTimeout(this._relayoutTimer);
+      this._relayoutTimer = setTimeout(() => this.relayoutZones(), 120);
+    },
 
     // Outil suppression : ferme un node FERMABLE en un clic. Fichier -> closeEditor (garde « non
     // sauvegardé »). Dossier -> closeFolderNode (shift = ferme aussi le contenu). Built-in
@@ -699,7 +916,7 @@ document.addEventListener('alpine:init', () => {
         // Brique G : matérialise la chaîne de dossiers du fichier, puis ancre l'éditeur sur SA node dossier.
         const folderWrap = await this._ensureFolderChain(path, created);
         const folderId = folderWrap ? folderWrap.dataset.id : undefined;
-        pos = this.editorSpawnPos(folderWrap);
+        pos = this.editorSpawnPos(folderWrap, { w: 210, h: 64 }); // taille de l'éditeur RÉDUIT (read) -> anneau serré, câble court
         let node;
         try {
           const r = await fetch('/api/canvas/nodes', {
@@ -730,10 +947,9 @@ document.addEventListener('alpine:init', () => {
         wrap.classList.add('spawning');                    // invisible jusqu'à l'arrivée de la comète
         world.appendChild(wrap);
         nodeId = node.id;
-        // les nouveaux nodes (dossiers + éditeur) sont DÉJÀ placés (editorSpawnPos, trou libre) ; on ne
-        // bouge rien d'existant. On (re)dessine les câbles puis on cadre si ça déborde.
-        this.drawCables();
-        this.fitView();
+        // nouveau node ajouté : relaxation des zones (replace sans overlap + range les fichiers),
+        // qui (re)dessine les câbles + cadre. La comète masque ensuite les câbles neufs.
+        this._scheduleRelayout(); // rafale -> un seul relayout (état persisté convergé, un lot de POST)
         this._enforceSpawnCap();                            // node maintenant dans le DOM : re-vérifie le plafond (rafale)
         // cache les câbles de TOUS les nodes neufs (dossiers + éditeur) : la comète les TRACE en arrivant.
         const svg = this.ensureCablesLayer();
@@ -1207,7 +1423,7 @@ document.addEventListener('alpine:init', () => {
         }
         const world = this.$root.querySelector('.world');
         if (world) world.appendChild(this.renderNode(node));
-        this.drawCables(); this.fitView(); // node déjà placé (editorSpawnPos) ; rien d'existant ne bouge
+        this._scheduleRelayout(); // rafale -> un seul relayout (état persisté convergé, un lot de POST)
       } finally {
         this._pendingSpots = this._pendingSpots.filter((s) => !(s.x === pos.x && s.y === pos.y));
       }
@@ -1216,8 +1432,8 @@ document.addEventListener('alpine:init', () => {
     // VERS L'EXTÉRIEUR (dendrite) dans le 1er TROU LIBRE, câble dégagé. Placé UNE SEULE FOIS puis
     // laissé en place : on ne re-calcule JAMAIS les positions des nodes existants (pas de clignotement).
     // Éventail déterministe (sans aléa) -> placement prévisible et stable.
-    editorSpawnPos(anchorWrap = null, size = { w: 520, h: 440 }) {
-      const C = window.MekiCollision, K = window.MekiCables;
+    editorSpawnPos(anchorWrap = null, size = { w: 520, h: 440 }, kind = 'fileeditor') {
+      const C = window.MekiCollision, K = window.MekiCables, T = window.MekiTerritories;
       const explorer = this.$root.querySelector('.node-wrap[data-kind="fileexplorer"]');
       const ex = anchorWrap || explorer;                 // ancre = node dossier du fichier, sinon explorateur
       let ab = { x: 360, y: 0, w: 300, h: 200 };
@@ -1248,32 +1464,83 @@ document.addEventListener('alpine:init', () => {
       if (Math.hypot(odx, ody) > 5) {
         baseAng = Math.atan2(ody, odx);
       } else {
-        baseAng = 0; let gap = -1;
-        const occ = occupied.slice().sort((a, b) => a - b);
-        for (let i = 0; i < occ.length; i++) {
-          const a0 = occ[i], a1 = i + 1 < occ.length ? occ[i + 1] : occ[0] + Math.PI * 2;
-          if (a1 - a0 > gap) { gap = a1 - a0; baseAng = a0 + (a1 - a0) / 2; }
-        }
+        baseAng = window.MekiZoneLayout ? window.MekiZoneLayout.freestAngle(occupied) : 0;
       }
-      const minR = Math.max(ab.w, ab.h) / 2 + Math.max(size.w, size.h) / 2 + 70;
+      const minR = Math.max(ab.w, ab.h) / 2 + Math.max(size.w, size.h) / 2 + 10; // marge resserrée -> init proche du parent (câbles courts ; relayout règle l'overlap)
       const at = (x, y) => ({ x: Math.round(x), y: Math.round(y), w: size.w, h: size.h });
       const ctr = (s) => ({ x: s.x + size.w / 2, y: s.y + size.h / 2 });
-      let fallback = null;
-      for (let i = 0; i < 60; i++) {
-        const off = ((i % 2) ? 1 : -1) * Math.ceil(i / 2) * 0.2; // éventail ± autour de la direction extérieure
-        const ang = baseAng + off;
-        const dist = minR + Math.floor(i / 18) * 150;          // élargit l'anneau si tout est pris
-        const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
-        if (!C.isFree(cand, all, C.GAP)) continue;             // pas de chevauchement
-        if (!fallback) fallback = cand;
-        if (K && K.pathHits([ctr(cand), aC], cableObs)) continue; // le câble du node ne traverse pas un autre node
-        if (K && cablePaths.some((pts) => K.pathHits(pts, [cand]))) continue; // ni un câble existant ne passe sous le node
-        this._pendingSpots.push(cand);
-        return cand;
+      // RÉPULSION STRICTE — 2 règles : (1) la zone d'un dossier ne touche AUCUNE autre zone : on
+      // exige un VIDE (on dilate la zone candidate de VOID avant le test d'intersection contre
+      // TOUTES les autres zones, frères ET parent/enfant) ; (2) une node DOSSIER ne doit être dans
+      // aucune zone — elle fait le pont DANS le vide. Zone = fichiers directs (cf. folderBlobCorners).
+      // tag d'un spot EN ATTENTE : fid (dossier dont l'éditeur rejoint la zone) ou folder=true, pour
+      // que des spawns CONCURRENTS voient mutuellement leur zone/dossier pas encore dans le DOM.
+      const tag = (s) => (kind === 'folder')
+        ? { x: s.x, y: s.y, w: size.w, h: size.h, folder: true }
+        : { x: s.x, y: s.y, w: size.w, h: size.h, ed: true, fid: (anchorWrap && anchorWrap.dataset.kind === 'folder') ? anchorWrap.dataset.id : '' };
+      let repel = null;
+      if (T && anchorWrap && anchorWrap.dataset.kind === 'folder') {
+        const nb = this.nodeBoxes();
+        const groups = this.folderBlobCorners(nb);
+        // zones EN ATTENTE : éditeurs de spawns concurrents pas encore rendus (sinon 2 zones posées
+        // "en même temps" se chevauchent, aucune ne voyant l'autre).
+        this._pendingSpots.forEach((s) => { if (s.ed && s.fid && groups.has(s.fid)) for (const c of T.boxCorners(s)) groups.get(s.fid).push(c); });
+        const zones = [];           // {fid, hull} de chaque zone (≥1 fichier)
+        groups.forEach((pts, fid) => { if (pts.length >= 3) { const h = T.convexHull(pts); if (h.length >= 3) zones.push({ fid, hull: h }); } });
+        const folders = [];         // {fid|null, hull} : nodes dossier (DOM + en attente) hors des zones
+        nb.forEach((info, id) => { if (info.kind === 'folder') folders.push({ fid: id, hull: T.convexHull(T.boxCorners(info.box)) }); });
+        this._pendingSpots.forEach((s) => { if (s.folder) folders.push({ fid: null, hull: T.convexHull(T.boxCorners(s)) }); });
+        repel = { base: groups.get(anchorWrap.dataset.id) || [], anchorId: anchorWrap.dataset.id, zones, folders, isFolder: kind === 'folder' };
       }
-      const spot = fallback || C.findFreeSpot({ x: aC.x + minR, y: aC.y - size.h / 2 }, size, all, C.GAP);
-      this._pendingSpots.push({ x: spot.x, y: spot.y, w: size.w, h: size.h });
-      return spot;
+      const VOID = 26;  // vide minimal entre deux zones (aligné sur le VOID de relayoutZones -> placement cohérent)
+      const DRAW = 26;  // marge ≈ pad de dessin du blob (22) : on raisonne sur le blob VISIBLE
+      const repelOk = (cand) => {
+        if (!repel) return true;
+        const box = T.convexHull(T.boxCorners(cand));
+        if (repel.isFolder) {
+          // (2) la node dossier candidate ne doit toucher AUCUN blob dessiné (le vide est son habitat)
+          return !repel.zones.some((z) => T.convexPolysIntersect(box, T.dilate(z.hull, DRAW)));
+        }
+        // (1) la zone (ancre + ce fichier) reste à ≥ VIDE de TOUTE autre zone
+        const aug = T.convexHull(repel.base.concat(box));
+        if (aug.length < 3) return true;
+        if (repel.zones.some((z) => z.fid !== repel.anchorId && T.convexPolysIntersect(T.dilate(aug, VOID), z.hull))) return false;
+        // (2) la zone ne dépasse pas dans une node dossier : marge 0 pour SA propre node (elle reste
+        // sur la BORDURE de sa zone), marge DRAW pour les autres (qui vivent dans le vide, hors zone).
+        return !repel.folders.some((f) => T.convexPolysIntersect(T.dilate(aug, f.fid === repel.anchorId ? 0 : DRAW), f.hull));
+      };
+      // Les fichiers d'un dossier se PACKENT en anneaux serrés directement VERS L'EXTÉRIEUR du
+      // dossier (cône borné), jamais en arc large : la zone reste un petit COIN convexe LOCAL (la
+      // node dossier à son bord intérieur), au lieu d'un arc dont l'enveloppe convexe engloberait
+      // les zones voisines. Le packing par anneau (proche d'abord) garde la zone compacte.
+      const valid = (cand) => C.isFree(cand, all, C.GAP)
+        && !(K && K.pathHits([ctr(cand), aC], cableObs))
+        && !(K && cablePaths.some((pts) => K.pathHits(pts, [cand])))
+        && repelOk(cand);
+      const fOffs = [0, 0.26, -0.26, 0.52, -0.52, 0.78, -0.78, 1.04, -1.04, 1.3, -1.3];
+      for (let ring = 0; ring < 16; ring++) {
+        const dist = minR + ring * 55;
+        for (const off of fOffs) {
+          const ang = baseAng + off;
+          const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
+          if (valid(cand)) { const t = tag(cand); this._pendingSpots.push(t); return t; }
+        }
+      }
+      // GARANTIE des règles : balayage PLEIN CERCLE à rayon croissant pour un spot repel-OK (il y a
+      // toujours de la place loin). On ne retombe JAMAIS sur un spot qui violerait le vide entre zones.
+      for (let ring = 1; ring <= 32; ring++) {
+        const dist = minR + ring * 75;
+        for (let k = 0; k < 24; k++) {
+          const ang = baseAng + ((k % 2) ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12);
+          const cand = at(aC.x + Math.cos(ang) * dist - size.w / 2, aC.y + Math.sin(ang) * dist - size.h / 2);
+          if (C.isFree(cand, all, C.GAP) && repelOk(cand)) { const t = tag(cand); this._pendingSpots.push(t); return t; }
+        }
+      }
+      // dernier recours (quasi jamais atteint) : un trou libre, quitte à frôler une zone.
+      const spot = C.findFreeSpot({ x: aC.x + minR, y: aC.y - size.h / 2 }, size, all, C.GAP);
+      const t = tag({ x: spot.x, y: spot.y });
+      this._pendingSpots.push(t);
+      return t;
     },
     // ===== Brique G : node git, dossiers-en-nodes, réduire/agrandir =====
 
@@ -1367,7 +1634,7 @@ document.addEventListener('alpine:init', () => {
       if (!path || this._hasFolderNode(path) || this._creatingFolders[path]) return null;
       this._creatingFolders[path] = true;
       const anchor = this._nearestFolderAnchor(path);
-      const pos = this.editorSpawnPos(anchor, { w: 300, h: 320 });
+      const pos = this.editorSpawnPos(anchor, { w: 130, h: 120 }, 'folder'); // tuile dossier RÉDUITE -> câble court
       try {
         const r = await fetch('/api/canvas/nodes', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1502,8 +1769,7 @@ document.addEventListener('alpine:init', () => {
       for (const w of toRemove) await this._removeFolderNode(w);
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
-      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
+      this._scheduleRelayout(); // rafale -> un seul relayout (état persisté convergé, un lot de POST)
     },
 
     // Sortie MANUELLE d'un dossier (clic-droit) -> node dossier ÉPINGLÉE (permanente).
@@ -1512,8 +1778,7 @@ document.addEventListener('alpine:init', () => {
       await this._createFolderNode(path, { pinned: true });
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
-      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
+      this._scheduleRelayout(); // rafale -> un seul relayout (état persisté convergé, un lot de POST)
     },
 
     // Fermeture explicite d'un node dossier (croix). cascade (shift) = ferme aussi les enfants.
@@ -1544,8 +1809,7 @@ document.addEventListener('alpine:init', () => {
       }
       this._refreshFolderClaims();
       this._recableFolders();
-      this.drawCables();
-      this.fitView(); // structure changée : rien d'existant ne bouge, on redessine + cadre si ça déborde
+      this._scheduleRelayout(); // rafale -> un seul relayout (état persisté convergé, un lot de POST)
     },
 
     renderComponent(c, node) {
