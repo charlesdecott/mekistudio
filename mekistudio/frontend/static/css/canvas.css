@@ -225,7 +225,7 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
   overflow: visible; pointer-events: none;
   z-index: -2; /* encore derrière les câbles (-1) */
 }
-.territories .terri { stroke-width: 1.5; transition: opacity .3s ease; }
+.territories .terri { stroke-width: 2; transition: opacity .3s ease; }
 
 /* --- Câbles (layer SVG dans .world, sous tous les node-wrap) --- */
 .cables {
