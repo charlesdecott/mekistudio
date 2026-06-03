@@ -40,6 +40,14 @@ try {
     return { zones: terris.length, overlaps, pairs, folderTot, folderIn };
   });
   await p.screenshot({ path: 'scripts/.pw/zone-layout.png' });
+  // stabilité au reload : relayoutZones (deadband) ne doit PAS dériver les positions depuis le persisté.
+  const grab = () => p.evaluate(() => { const o = {}; document.querySelectorAll('.node-wrap[data-kind="folder"],.node-wrap[data-kind="fileeditor"]').forEach((w) => { o[w.dataset.id] = { x: parseFloat(w.style.left) || 0, y: parseFloat(w.style.top) || 0 }; }); return o; });
+  const before = await grab();
+  await p.goto(URL, { waitUntil: 'networkidle' }); await p.waitForSelector('.cmp-chat .chat-input'); await p.waitForTimeout(1500);
+  const after = await grab();
+  let maxD = 0; for (const id of Object.keys(before)) if (after[id]) maxD = Math.max(maxD, Math.hypot(after[id].x - before[id].x, after[id].y - before[id].y));
+  console.log('RELOAD_MAX_DELTA:', maxD.toFixed(1));
+  console.log(maxD <= 2 ? '✅ stable au reload (pas de dérive)' : '⚠️ dérive au reload: ' + maxD.toFixed(1) + 'px');
   await clear();
   console.log(JSON.stringify(m, null, 2));
   console.log(m.overlaps === 0 ? '✅ 0 chevauchement de zones' : '⚠️ ' + m.overlaps + ' chevauchement(s): ' + m.pairs.join(', '));
