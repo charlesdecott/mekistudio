@@ -107,7 +107,64 @@
     return true;
   }
 
-  const MekiTerritories = { convexHull, roundedHullPath, boxCorners, nearCorners, convexPolysIntersect, dilate };
+  function _centroid(poly) { let x = 0, y = 0; for (const p of poly) { x += p.x; y += p.y; } return { x: x / poly.length, y: y / poly.length }; }
+
+  // Vecteur de translation MINIMAL (MTV, par SAT) pour séparer le polygone convexe B de A : la plus
+  // petite poussée (direction + amplitude) qui annule le chevauchement. Retourne null si déjà disjoints.
+  function _mtv(A, B) {
+    let best = Infinity, bx = 0, by = 0;
+    const ca = _centroid(A), cb = _centroid(B);
+    for (const poly of [A, B]) {
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        let nx = -(b.y - a.y), ny = (b.x - a.x); const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;
+        let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;
+        for (const p of A) { const d = p.x * nx + p.y * ny; if (d < minA) minA = d; if (d > maxA) maxA = d; }
+        for (const p of B) { const d = p.x * nx + p.y * ny; if (d < minB) minB = d; if (d > maxB) maxB = d; }
+        const ov = Math.min(maxA, maxB) - Math.max(minA, minB);
+        if (ov <= 0) return null; // axe séparateur -> pas de chevauchement
+        if (ov < best) { best = ov; const sign = ((cb.x - ca.x) * nx + (cb.y - ca.y) * ny) >= 0 ? 1 : -1; bx = nx * sign; by = ny * sign; }
+      }
+    }
+    return { x: bx * best, y: by * best };
+  }
+
+  // Dé-collision par POLYGONES (zones de forme quelconque, p.ex. allongées) : écarte itérativement les
+  // paires qui se chevauchent (hull dilaté de PAD) en les translatant le long du MTV (séparation exacte
+  // par paire -> convergence robuste). pinned -> immobile. Déterministe (paires ordonnées, tie-break par
+  // id). items: [{id, poly:[{x,y}], pinned}]. Retourne Map<id,{x,y}> (translation à appliquer).
+  function separatePolys(items, opts) {
+    opts = opts || {};
+    const PAD = opts.pad == null ? 10 : opts.pad;
+    const ITERS = opts.iters == null ? 80 : opts.iters;
+    const off = new Map();
+    items.forEach((it) => off.set(it.id, { x: 0, y: 0 }));
+    const shift = (poly, d) => poly.map((p) => ({ x: p.x + d.x, y: p.y + d.y }));
+    for (let t = 0; t < ITERS; t++) {
+      let moved = false;
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i], b = items[j];
+          if (a.poly.length < 3 || b.poly.length < 3) continue;
+          const oa = off.get(a.id), ob = off.get(b.id);
+          const pa = dilate(shift(a.poly, oa), PAD), pb = shift(b.poly, ob);
+          let m = _mtv(pa, pb);
+          if (!m) continue;
+          if (Math.abs(m.x) < 1e-9 && Math.abs(m.y) < 1e-9) { m = { x: a.id < b.id ? -PAD : PAD, y: 0 }; } // confondus -> déterministe
+          const wa = a.pinned ? 0 : (b.pinned ? 1 : 0.5), wb = b.pinned ? 0 : (a.pinned ? 1 : 0.5);
+          oa.x -= m.x * wa; oa.y -= m.y * wa;
+          ob.x += m.x * wb; ob.y += m.y * wb;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+    const out = new Map();
+    off.forEach((v, k) => out.set(k, { x: Math.round(v.x), y: Math.round(v.y) }));
+    return out;
+  }
+
+  const MekiTerritories = { convexHull, roundedHullPath, boxCorners, nearCorners, convexPolysIntersect, dilate, separatePolys };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiTerritories;
   if (typeof window !== 'undefined') root.MekiTerritories = MekiTerritories;
 })(typeof window !== 'undefined' ? window : globalThis);

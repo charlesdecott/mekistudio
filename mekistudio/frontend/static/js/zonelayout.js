@@ -51,17 +51,20 @@
   // Retourne le top-left de chaque fichier, dans le même ordre que `fileSizes`.
   function packAround(folderCenter, folderSize, fileSizes, opts) {
     opts = opts || {};
-    const gap = opts.gap == null ? 18 : opts.gap;
+    const gap = opts.gap == null ? 14 : opts.gap;
     const out = [];
     if (!fileSizes || !fileSizes.length) return out;
     const placed = [{ x: folderCenter.x - folderSize.w / 2, y: folderCenter.y - folderSize.h / 2, w: folderSize.w, h: folderSize.h }];
     const hit = (a, b) => a.x < b.x + b.w + gap && a.x + a.w + gap > b.x && a.y < b.y + b.h + gap && a.y + a.h + gap > b.y;
-    const step = Math.max(...fileSizes.map((s) => Math.max(s.w, s.h))) + gap;
-    const base = Math.max(folderSize.w, folderSize.h) / 2;
+    // Anneaux SERRÉS qui HUGGENT le dossier : le pas radial suit la HAUTEUR des fichiers (lignes proches),
+    // l'espacement angulaire suit la LARGEUR (pas de chevauchement). -> zone compacte, lien fichier court.
+    const rowStep = Math.max(...fileSizes.map((s) => s.h)) + gap;
+    const colStep = Math.max(...fileSizes.map((s) => s.w)) + gap;
+    const base = Math.max(folderSize.w, folderSize.h) / 2 + gap + Math.max(...fileSizes.map((s) => s.h)) / 2; // 1er anneau HUGGE la tuile
     let idx = 0;
-    for (let ring = 1; ring <= 40 && idx < fileSizes.length; ring++) {
-      const radius = base + ring * step;
-      const slots = Math.max(4, Math.floor((2 * Math.PI * radius) / step));
+    for (let ring = 1; ring <= 60 && idx < fileSizes.length; ring++) {
+      const radius = base + (ring - 1) * rowStep;
+      const slots = Math.max(3, Math.floor((2 * Math.PI * radius) / colStep));
       for (let k = 0; k < slots && idx < fileSizes.length; k++) {
         const ang = (k / slots) * 2 * Math.PI; // déterministe, régulier
         const fs = fileSizes[idx];
@@ -90,7 +93,74 @@
     return best;
   }
 
-  const MekiZoneLayout = { solve, packAround, freestAngle };
+  // Layout d'ARBRE RADIAL orienté (dendrite) : l'explorateur (racine, pinned) au centre, chaque dossier
+  // posé VERS L'EXTÉRIEUR sur un rayon. Une chaîne à enfant unique part TOUT DROIT (même cap que le
+  // parent, rayon croissant) ; une fourche évente ses enfants dans un CÔNE vers l'avant (jamais en sens
+  // opposé). Rayon d'un enfant = rayon parent + r_parent + GAP + r_enfant (sa zone juste au-delà de celle
+  // du parent). Déterministe (enfants triés par id) -> stable au reload. zones: [{id,parentId,radius,
+  // pinned,center}]. Retourne Map<id,{x,y}> (centres). La racine garde son centre courant.
+  function radialLayout(zones, opts) {
+    opts = opts || {};
+    const GAP = opts.gap == null ? 40 : opts.gap;
+    const CONE = opts.cone == null ? 0.85 : opts.cone; // demi-angle d'éventail d'une fourche (~49°)
+    const START = opts.start == null ? -Math.PI / 2 : opts.start; // 1er rayon vers le HAUT
+    const byId = new Map(), kids = new Map(), pos = new Map();
+    zones.forEach((z) => { byId.set(z.id, z); kids.set(z.id, []); });
+    let root = zones.find((z) => z.pinned) || zones.find((z) => !z.parentId || !byId.has(z.parentId)) || zones[0];
+    if (!root) return pos;
+    zones.forEach((z) => {
+      if (z.id === root.id) return;
+      const pid = (z.parentId && byId.has(z.parentId)) ? z.parentId : root.id; // orphelin -> racine
+      kids.get(pid).push(z.id);
+    });
+    // ordre des enfants par sortKey (ex. chemin de dossier) si fourni, sinon par id : le 1er rend le
+    // layout REPRODUCTIBLE quels que soient les ids générés (course des spawns concurrents).
+    const keyOf = (id) => { const z = byId.get(id); return (z && z.sortKey != null) ? String(z.sortKey) : String(id); };
+    kids.forEach((list) => list.sort((a, b) => keyOf(a).localeCompare(keyOf(b))));
+    const rootC = { x: root.center.x, y: root.center.y };
+    pos.set(root.id, { x: Math.round(rootC.x), y: Math.round(rootC.y) });
+    // pose récursive : un node à (bearing, radius) depuis la racine ; ses enfants en cône vers l'avant.
+    const place = (nodeId, bearing, radius) => {
+      pos.set(nodeId, { x: Math.round(rootC.x + Math.cos(bearing) * radius), y: Math.round(rootC.y + Math.sin(bearing) * radius) });
+      const node = byId.get(nodeId), cl = kids.get(nodeId), k = cl.length;
+      cl.forEach((cid, i) => {
+        const child = byId.get(cid);
+        const cr = radius + node.radius + GAP + child.radius;
+        const cb = k === 1 ? bearing : bearing - CONE + (2 * CONE) * (i / (k - 1)); // 1 enfant -> tout droit
+        place(cid, cb, cr);
+      });
+    };
+    const top = kids.get(root.id), K = top.length;
+    top.forEach((cid, i) => {
+      const child = byId.get(cid);
+      const r = root.radius + GAP + child.radius;
+      const b = K === 1 ? START : START + (i / K) * 2 * Math.PI; // dossiers de 1er niveau étalés autour
+      place(cid, b, r);
+    });
+    return pos;
+  }
+
+  // Packe les fichiers d'un dossier en COLONNE le long d'un CAP (bearing) -> ils filent VERS L'EXTÉRIEUR
+  // (dendrite), la zone reste ÉTROITE côté parent (juste la tuile) -> les dossiers peuvent être proches.
+  // Retourne le top-left de chaque fichier RELATIF au centre de la tuile (origine). Déterministe.
+  function packOutward(folderSize, fileSizes, bearing, opts) {
+    opts = opts || {};
+    const gap = opts.gap == null ? 12 : opts.gap;
+    const out = [];
+    if (!fileSizes || !fileSizes.length) return out;
+    const ux = Math.cos(bearing), uy = Math.sin(bearing);
+    let d = Math.max(folderSize.w, folderSize.h) / 2 + gap; // 1er fichier juste au-delà de la tuile
+    for (let i = 0; i < fileSizes.length; i++) {
+      const fs = fileSizes[i];
+      const ext = Math.abs(ux) * fs.w + Math.abs(uy) * fs.h; // extension du fichier le long du cap
+      const cx = ux * (d + ext / 2), cy = uy * (d + ext / 2); // centre du fichier sur le rayon
+      out.push({ x: Math.round(cx - fs.w / 2), y: Math.round(cy - fs.h / 2) });
+      d += ext + gap;
+    }
+    return out;
+  }
+
+  const MekiZoneLayout = { solve, packAround, freestAngle, radialLayout, packOutward };
   if (typeof module !== 'undefined' && module.exports) module.exports = MekiZoneLayout;
   if (typeof window !== 'undefined') root.MekiZoneLayout = MekiZoneLayout;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -83,6 +83,24 @@ test('packAround : liste vide -> []', () => {
   assert.deepEqual(Z.packAround({ x: 0, y: 0 }, { w: 116, h: 108 }, []), []);
 });
 
+test('packOutward : fichiers en colonne VERS LE HAUT (cap -PI/2), étroits en x, empilés en y', () => {
+  const out = Z.packOutward({ w: 116, h: 108 }, [{ w: 150, h: 46 }, { w: 150, h: 46 }, { w: 150, h: 46 }], -Math.PI / 2, { gap: 12 });
+  assert.equal(out.length, 3);
+  // cap vertical -> tous centrés en x (top-left = -w/2 = -75) ; y de plus en plus négatif (vers le haut)
+  out.forEach((p) => assert.equal(p.x, -75, 'centré en x'));
+  assert.ok(out[0].y < 0 && out[1].y < out[0].y && out[2].y < out[1].y, 'empilés vers le haut');
+});
+
+test('packOutward : cap horizontal -> fichiers alignés en x, centrés en y', () => {
+  const out = Z.packOutward({ w: 116, h: 108 }, [{ w: 150, h: 46 }, { w: 150, h: 46 }], 0, { gap: 12 });
+  out.forEach((p) => assert.equal(p.y, -23, 'centré en y (top = -h/2)'));
+  assert.ok(out[1].x > out[0].x && out[0].x > 0, 'vers la droite, croissant');
+});
+
+test('packOutward : liste vide -> []', () => {
+  assert.deepEqual(Z.packOutward({ w: 116, h: 108 }, [], 0), []);
+});
+
 test('freestAngle : liste vide -> 0', () => {
   assert.equal(Z.freestAngle([]), 0);
 });
@@ -90,6 +108,43 @@ test('freestAngle : liste vide -> 0', () => {
 test('freestAngle : milieu du plus grand secteur libre', () => {
   const a = Z.freestAngle([0, Math.PI / 2]);
   assert.ok(Math.abs(a - (5 * Math.PI / 4)) < 1e-6, 'milieu du grand secteur, obtenu ' + a);
+});
+
+test('radialLayout : chaîne à enfant unique -> rayon DROIT vers l’extérieur (colinéaire, rayon croissant)', () => {
+  const zones = [
+    { id: 'root', parentId: null, radius: 50, pinned: true, center: { x: 0, y: 0 } },
+    { id: 'a', parentId: 'root', radius: 40, pinned: false, center: { x: 0, y: 0 } },
+    { id: 'b', parentId: 'a', radius: 30, pinned: false, center: { x: 0, y: 0 } },
+  ];
+  const pos = Z.radialLayout(zones, { gap: 40 });
+  assert.equal(pos.get('a').x, pos.get('root').x, 'a colinéaire à la racine en x');
+  assert.equal(pos.get('b').x, pos.get('a').x, 'b prolonge le même rayon (x identique)');
+  assert.ok(Math.abs(pos.get('b').y) > Math.abs(pos.get('a').y), 'b plus loin que a');
+});
+
+test('radialLayout : fourche -> enfants séparés, du côté avant (pas en sens opposé)', () => {
+  const zones = [
+    { id: 'root', parentId: null, radius: 60, pinned: true, center: { x: 0, y: 0 } },
+    { id: 'p', parentId: 'root', radius: 40, pinned: false, center: { x: 0, y: 0 } },
+    { id: 'c1', parentId: 'p', radius: 30, pinned: false, center: { x: 0, y: 0 } },
+    { id: 'c2', parentId: 'p', radius: 30, pinned: false, center: { x: 0, y: 0 } },
+  ];
+  const pos = Z.radialLayout(zones, { gap: 40, cone: 0.85 });
+  const p = pos.get('p'), c1 = pos.get('c1'), c2 = pos.get('c2');
+  assert.ok(c1.y < 0 && c2.y < 0, 'enfants du côté avant (haut)');
+  assert.ok(Math.hypot(c1.x - c2.x, c1.y - c2.y) > 1, 'enfants séparés');
+  assert.ok(Math.hypot(c1.x, c1.y) > Math.hypot(p.x, p.y), 'enfants plus loin que le parent');
+});
+
+test('radialLayout : déterministe', () => {
+  const mk = () => ([
+    { id: 'root', parentId: null, radius: 50, pinned: true, center: { x: 5, y: 7 } },
+    { id: 'a', parentId: 'root', radius: 40, pinned: false, center: { x: 0, y: 0 } },
+    { id: 'b', parentId: 'root', radius: 40, pinned: false, center: { x: 0, y: 0 } },
+    { id: 'c', parentId: 'a', radius: 30, pinned: false, center: { x: 0, y: 0 } },
+  ]);
+  const p1 = Z.radialLayout(mk()), p2 = Z.radialLayout(mk());
+  for (const id of ['root', 'a', 'b', 'c']) assert.deepEqual(p1.get(id), p2.get(id));
 });
 
 test('freestAngle : un seul occupé -> opposé', () => {

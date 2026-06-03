@@ -72,6 +72,23 @@ test('convexPolysIntersect : polygone dégénéré (<3 pts) -> false', () => {
   assert.equal(T.convexPolysIntersect([{ x: 0, y: 0 }, { x: 1, y: 1 }], [{ x: 0, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }]), false);
 });
 
+test('separatePolys : deux carrés qui se chevauchent sont écartés (plus aucune intersection)', () => {
+  const sq = (x, y) => [{ x, y }, { x: x + 40, y }, { x: x + 40, y: y + 40 }, { x, y: y + 40 }];
+  const items = [{ id: 'a', poly: sq(0, 0), pinned: false }, { id: 'b', poly: sq(20, 0), pinned: false }];
+  const off = T.separatePolys(items, { pad: 6, step: 8, iters: 100 });
+  const shift = (poly, d) => poly.map((p) => ({ x: p.x + d.x, y: p.y + d.y }));
+  const a2 = shift(items[0].poly, off.get('a')), b2 = shift(items[1].poly, off.get('b'));
+  assert.equal(T.convexPolysIntersect(a2, b2), false, 'plus de chevauchement après séparation');
+});
+
+test('separatePolys : une zone pinned ne bouge pas', () => {
+  const sq = (x) => [{ x, y: 0 }, { x: x + 40, y: 0 }, { x: x + 40, y: 40 }, { x, y: 40 }];
+  const items = [{ id: 'root', poly: sq(0), pinned: true }, { id: 'a', poly: sq(15), pinned: false }];
+  const off = T.separatePolys(items, { pad: 6, step: 8, iters: 100 });
+  assert.deepEqual(off.get('root'), { x: 0, y: 0 }, 'pinned immobile');
+  assert.ok(Math.hypot(off.get('a').x, off.get('a').y) > 0, 'a a bougé');
+});
+
 test('roundedHullPath : la zone englobe la tuile dossier (centre dedans)', () => {
   // tuile dossier + 2 fichiers autour -> le blob doit contenir le centre de la tuile
   const folder = T.boxCorners({ x: 480, y: 470, w: 116, h: 108 }); // centre (538, 524)
