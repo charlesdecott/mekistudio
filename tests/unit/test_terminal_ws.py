@@ -29,6 +29,17 @@ def test_ws_terminal_streams_output(tmp_path):
             assert "meki-ws" in buf
 
 
+def test_ws_rejects_unsafe_terminal_id(tmp_path):
+    from fastapi import WebSocketDisconnect
+    app = create_app(tmp_path)
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws/term/bad.id") as ws:
+                ws.receive_json()  # serveur ferme 1008 -> lève
+        # aucun dossier disque créé pour un id refusé (anti path-traversal)
+        assert not (tmp_path / ".mekistudio" / "terminals" / "bad.id").exists()
+
+
 def test_ws_terminal_resize_is_accepted(tmp_path):
     app = create_app(tmp_path)
     with TestClient(app) as client:

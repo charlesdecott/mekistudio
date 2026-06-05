@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+# Id de session OPAQUE et sûr (conversation chat / terminal). `new_id()` produit un
+# uuid4 hex (32 car. [0-9a-f]) qui satisfait ce motif. Bloque tout ce qui pourrait
+# servir de traversée de chemin (`.`, `/`, `\`, `:`, espaces) quand l'id arrive d'une
+# URL WebSocket et sert à construire un dossier sur disque.
+_SAFE_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
+
+
+def is_safe_id(value: str) -> bool:
+    """Vrai si `value` est un id de session sûr à utiliser dans un chemin de fichier."""
+    return isinstance(value, str) and bool(_SAFE_ID_RE.match(value))
 
 
 def find_repo_root(start: Path) -> Path:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from mekistudio.backend.terminal.store import TerminalStore
 
 
@@ -41,6 +43,14 @@ def test_save_is_atomic_no_tmp_residue(tmp_path):
     store.save_meta({"cols": 80})
     d = tmp_path / ".mekistudio" / "terminals" / "term-4"
     assert not list(d.glob("*.tmp"))  # pas de fichier temporaire résiduel
+
+
+def test_traversal_terminal_id_rejected(tmp_path):
+    # garde défensive : un id avec des `..\` ne doit pas pouvoir viser hors du dossier terminals
+    with pytest.raises(ValueError):
+        TerminalStore(tmp_path, r"..\..\PWNED")
+    with pytest.raises(ValueError):
+        TerminalStore(tmp_path, "../escape")
 
 
 def test_corrupt_meta_tolerated(tmp_path):

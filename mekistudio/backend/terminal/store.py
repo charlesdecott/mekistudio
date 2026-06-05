@@ -15,7 +15,12 @@ def _now_ms() -> int:
 
 class TerminalStore:
     def __init__(self, root: Path, terminal_id: str) -> None:
-        self._dir = Path(root) / ".mekistudio" / "terminals" / terminal_id
+        base = (Path(root) / ".mekistudio" / "terminals").resolve()
+        self._dir = (base / terminal_id).resolve()
+        # Garde défensive (en plus de la validation à la frontière WS) : un terminal_id
+        # contenant des séparateurs/`..` ne doit JAMAIS écrire hors du dossier des terminaux.
+        if not self._dir.is_relative_to(base):
+            raise ValueError(f"terminal_id invalide (hors du dossier terminals) : {terminal_id!r}")
         self._scrollback = self._dir / "scrollback.txt"
         self._meta = self._dir / "meta.json"
         self._tid = terminal_id

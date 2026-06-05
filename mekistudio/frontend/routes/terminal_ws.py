@@ -9,6 +9,8 @@ import contextlib
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from mekistudio.backend.paths import is_safe_id
+
 router = APIRouter()
 
 _MAX_DIM = 1000  # borne défensive sur cols/rows (entrée client)
@@ -24,6 +26,11 @@ def _clamp_dim(v, default: int) -> int:
 @router.websocket("/ws/term/{terminal_id}")
 async def terminal_ws(ws: WebSocket, terminal_id: str) -> None:
     await ws.accept()
+    # terminal_id vient de l'URL et sert à construire un dossier disque -> refuser tout id
+    # non opaque (anti path-traversal : `[^/]+` du routeur ne bloque pas `\` sur Windows).
+    if not is_safe_id(terminal_id):
+        await ws.close(code=1008)  # policy violation
+        return
     manager = ws.app.state.terminal_manager
     bridge = await manager.get_or_create(terminal_id)
     queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
@@ -46,6 +53,8 @@ async def terminal_ws(ws: WebSocket, terminal_id: str) -> None:
     async def receiver() -> None:
         while True:
             msg = await ws.receive_json()
+            if not isinstance(msg, dict):
+                continue  # frame JSON non-objet (ex. 42, [..]) -> ignorée, pas de crash de la WS
             t = msg.get("type")
             if t == "attach":
                 try:

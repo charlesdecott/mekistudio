@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from mekistudio.backend.bootstrap import load_canvas, save_canvas
 from mekistudio.backend.components import iter_components
+from mekistudio.backend.paths import is_safe_id
 from mekistudio.frontend.routes.canvas import _canvas_lock  # lock partagé des écritures canvas.json
 
 router = APIRouter()
@@ -31,6 +32,11 @@ async def _rotate_node_conversation(repo_root: Path, old_id: str, new_id: str) -
 @router.websocket("/ws/chat/{conversation_id}")
 async def chat_ws(ws: WebSocket, conversation_id: str) -> None:
     await ws.accept()
+    # conversation_id vient de l'URL et sert à construire un dossier disque -> refuser tout id
+    # non opaque (anti path-traversal : `[^/]+` du routeur ne bloque pas `\` sur Windows).
+    if not is_safe_id(conversation_id):
+        await ws.close(code=1008)  # policy violation
+        return
     manager = ws.app.state.chat_manager
     repo_root = ws.app.state.repo_root
     bridge = await manager.get_or_create(conversation_id)
