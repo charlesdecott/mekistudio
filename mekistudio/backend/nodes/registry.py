@@ -4,7 +4,7 @@ from typing import Callable
 
 from mekistudio.backend.components import EditorComponent, iter_components
 from mekistudio.backend.models import CanvasState, Node
-from mekistudio.backend.nodes import chat, file_editor, file_explorer, folder, gitbranch, kernel
+from mekistudio.backend.nodes import chat, file_editor, file_explorer, folder, gitbranch, kernel, subcanvas
 from mekistudio.backend.nodes.parenting import longest_prefix_id
 
 # kind -> fabrique de node. Unique endroit qui connaît tous les kinds ; on
@@ -16,6 +16,7 @@ NODE_BUILDERS: dict[str, Callable[..., Node]] = {
     file_editor.KIND: file_editor.build_file_editor_node,
     chat.KIND: chat.build_chat_node,
     folder.KIND: folder.build_folder_node,
+    subcanvas.KIND: subcanvas.build_subcanvas_node,
 }
 
 

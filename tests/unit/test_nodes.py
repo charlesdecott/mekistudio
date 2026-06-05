@@ -236,3 +236,20 @@ def test_reconcile_editor_without_folder_falls_back_to_explorer():
     state = CanvasState(nodes=[e, ed])
     reconcile_source_links(state)
     assert ed.source_id == e.id  # plus long préfixe = explorateur ("")
+
+
+def test_build_subcanvas_node_structure():
+    from mekistudio.backend.components import HeaderComponent
+    from mekistudio.backend.nodes import SUBCANVAS_KIND, build_subcanvas_node
+    n = build_subcanvas_node()
+    assert n.kind == SUBCANVAS_KIND == "subcanvas"
+    # cadre dérivé : ni déplaçable, ni redimensionnable, ni configurable ; réductible via collapsed.
+    assert n.movable is False and n.resizable is False and n.configurable is False
+    assert n.collapsed is False
+    header = n.root.children[0].children[0]
+    assert isinstance(header, HeaderComponent)
+
+
+def test_build_node_includes_subcanvas():
+    from mekistudio.backend.nodes import SUBCANVAS_KIND, build_node
+    assert build_node(SUBCANVAS_KIND).kind == SUBCANVAS_KIND

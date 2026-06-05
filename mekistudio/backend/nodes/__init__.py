@@ -12,6 +12,8 @@ from mekistudio.backend.nodes.gitbranch import KIND as GITBRANCH_KIND
 from mekistudio.backend.nodes.gitbranch import build_gitbranch_node
 from mekistudio.backend.nodes.kernel import KIND as KERNEL_KIND
 from mekistudio.backend.nodes.kernel import build_kernel_node
+from mekistudio.backend.nodes.subcanvas import KIND as SUBCANVAS_KIND
+from mekistudio.backend.nodes.subcanvas import build_subcanvas_node
 from mekistudio.backend.nodes.registry import (
     CANONICAL_PARENT_KIND,
     NODE_BUILDERS,
@@ -38,6 +40,8 @@ __all__ = [
     "build_chat_node",
     "FOLDER_KIND",
     "build_folder_node",
+    "SUBCANVAS_KIND",
+    "build_subcanvas_node",
     "CANONICAL_PARENT_KIND",
     "PATH_BASED_KINDS",
     "NODE_BUILDERS",
