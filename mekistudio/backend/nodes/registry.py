@@ -107,11 +107,11 @@ def derive_source_id(state: CanvasState, node: Node) -> str | None:
 
 
 def reconcile_source_links(state: CanvasState) -> CanvasState:
-    """Repose les liens parent. Idempotent, déterministe. Brique G :
+    """Repose les liens parent. Idempotent, déterministe. Brique H :
     - kinds path-aware (folder/fileeditor) : parent par plus-long-préfixe de chemin ;
     - kinds par kind : réparés si ABSENTS/CASSÉS *ou* si le parent courant est du
-      MAUVAIS kind (migration — ex. chat/explorateur encore reliés au kernel après
-      l'ajout de la node git)."""
+      MAUVAIS kind (migration — ex. l'explorateur encore relié à git est rerattaché
+      au subcanvas après l'injection de la node subcanvas)."""
     by_id = {n.id: n for n in state.nodes}
     for node in state.nodes:
         if node.kind == kernel.KIND:
