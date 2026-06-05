@@ -20,19 +20,38 @@
     let destroyed = false;
     let lastCols = 0;
     let lastRows = 0;
+    let live = false;          // false tant qu'on rejoue l'historique (avant le marqueur 'attached')
+    let replayBuf = '';        // accumulateur du scrollback rejoué (assaini d'un bloc à 'attached')
 
     function sendWs(obj) {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
     }
 
-    // Recalcule cols/rows depuis la taille du host et notifie le PTY (si ça a changé).
-    function doFit() {
+    // Assainit le scrollback REJOUÉ : retire UNIQUEMENT les séquences qui font RÉPONDRE le terminal
+    // (sinon, rejouées, leurs réponses partent en INPUT du PTY et polluent la ligne de commande —
+    // ex. `\x1b[c` -> xterm renvoie `\x1b[?1;2c`). On GARDE couleurs, déplacements de curseur et
+    // effacements -> les redessins incrémentaux de PSReadLine se rendent correctement (l'historique
+    // est fidèle). Le flux LIVE (après 'attached') reste 100% brut.
+    function sanitizeForReplay(s) {
+      return s
+        .replace(/\x1b\[[<>=?]?[0-9;]*c/g, '')      // Device Attributes (DA) : ESC [ … c
+        .replace(/\x1b\[[0-9;]*n/g, '')             // Device Status Report (DSR) : ESC [ … n (5n/6n)
+        .replace(/\x1b\[\?[0-9;]*\$[p-y]/g, '')     // requête de mode (DECRQM) : ESC [ ? … $ p
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC (titre/requêtes couleur) : ESC ] … BEL|ST
+        .replace(/\x1bP[^\x1b]*\x1b\\/g, '');        // DCS : ESC P … ST
+    }
+
+    // Recalcule cols/rows depuis la taille du host et notifie le PTY. `force` envoie même si
+    // la taille n'a pas changé : indispensable à l'ouverture de la WS, car le tout 1er fit a lieu
+    // AVANT la connexion (sendWs no-op) — sans force, le PTY resterait à 80x24 (spawn) alors
+    // qu'xterm affiche une autre largeur -> PSReadLine recalcule mal les retours ligne (corruption).
+    function doFit(force) {
       if (!fit || !term || destroyed) return;
       const r = container.getBoundingClientRect();
       if (r.width < 8 || r.height < 8) return; // pas encore dimensionné (DOM en cours de pose)
       try { fit.fit(); } catch (_) { /* host transitoirement à 0 */ }
       const cols = term.cols, rows = term.rows;
-      if (cols && rows && (cols !== lastCols || rows !== lastRows)) {
+      if (cols && rows && (force || cols !== lastCols || rows !== lastRows)) {
         lastCols = cols; lastRows = rows;
         sendWs({ type: 'resize', cols: cols, rows: rows });
       }
@@ -42,12 +61,14 @@
       if (destroyed) return; // défense : un reconnect en vol ne ressuscite pas une vue détruite
       const myGen = ++generation;
       intentionalClose = false;
+      live = false;           // (re)connexion -> on repart en mode replay jusqu'au 'attached'
+      replayBuf = '';
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(proto + '://' + location.host + '/ws/term/' + terminalId);
       ws.addEventListener('open', () => {
         backoff = 500;
         sendWs({ type: 'attach', since_seq: lastSeq });
-        doFit(); // pousse la taille courante au PTY dès l'attache
+        doFit(true); // FORCE la taille réelle au PTY dès l'attache (sinon il reste à 80x24)
       });
       ws.addEventListener('message', (e) => {
         if (myGen !== generation) return; // socket périmée (destroy/reconnect)
@@ -55,14 +76,24 @@
         try { ev = JSON.parse(e.data); } catch (_) { return; }
         if (ev.type === 'output') {
           lastSeq = ev.seq;
-          if (term) term.write(ev.data);
+          if (!term) return;
+          if (live) term.write(ev.data);          // live : flux brut (couleurs, curseur, etc.)
+          else replayBuf += ev.data;              // replay : on accumule pour assainir d'un bloc
+        } else if (ev.type === 'attached') {
+          // fin du replay : écrit l'historique ASSAINI d'un seul coup (pas de coupure de séquence
+          // au milieu d'un chunk), puis passe en live (brut).
+          if (term && replayBuf) {
+            term.write(sanitizeForReplay(replayBuf));
+            if (!replayBuf.endsWith('\n')) term.write('\r\n');
+          }
+          replayBuf = '';
+          live = true;
         } else if (ev.type === 'exit') {
           if (term) {
             const code = (ev.code !== null && ev.code !== undefined) ? ' — code ' + ev.code : '';
             term.write('\r\n\x1b[90m[processus terminé' + code + ' — recharge pour relancer]\x1b[0m\r\n');
           }
         }
-        // 'attached' : fin de replay -> rien de spécial côté terminal.
       });
       ws.addEventListener('close', () => {
         if (intentionalClose || myGen !== generation) return;
@@ -97,6 +128,34 @@
       doFit();
       // clavier -> PTY (xterm sérialise déjà les touches/séquences en str)
       term.onData((d) => sendWs({ type: 'input', data: d }));
+
+      // --- copier/coller (l'API clipboard marche sur localhost = contexte sûr) ---
+      function copySelection() {
+        const sel = term.getSelection();
+        if (sel && navigator.clipboard) { navigator.clipboard.writeText(sel).catch(() => {}); return true; }
+        return false;
+      }
+      function pasteClipboard() {
+        if (!navigator.clipboard) return;
+        navigator.clipboard.readText().then((t) => { if (t) term.paste(t); }).catch(() => {});
+      }
+      // Ctrl/Cmd+C : copie la sélection si présente (sinon laisse xterm envoyer \x03 = interrupt).
+      // Ctrl/Cmd+V : colle. Ctrl+Shift+C/V (convention terminal) aussi.
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== 'keydown') return true;
+        const mod = e.ctrlKey || e.metaKey;
+        if (!mod) return true;
+        const k = (e.key || '').toLowerCase();
+        if (k === 'c' && (term.hasSelection() || e.shiftKey)) { if (copySelection()) return false; }
+        if (k === 'v') { pasteClipboard(); return false; }
+        return true;
+      });
+      // Clic droit : colle (réflexe console Windows) — ou copie si une sélection est active.
+      container.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (term.hasSelection()) copySelection();
+        else pasteClipboard();
+      });
       // re-fit au redimensionnement du node (débouncé)
       if (typeof ResizeObserver !== 'undefined') {
         ro = new ResizeObserver(() => {
@@ -110,6 +169,8 @@
 
     return {
       el: container,
+      get cols() { return term ? term.cols : 0; },
+      get rows() { return term ? term.rows : 0; },
       destroy() {
         destroyed = true;
         generation++; // invalide les sockets en vol

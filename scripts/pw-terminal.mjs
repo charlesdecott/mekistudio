@@ -57,6 +57,19 @@ try {
   check(after.includes(NEEDLE), 'sortie `' + NEEDLE + '` visible après Entrée');
   await p.screenshot({ path: 'scripts/.pw/terminal.png' });
 
+  // Rendu propre : on demande à PowerShell sa largeur de console et on vérifie qu'elle sort sur
+  // une ligne NETTE (un nombre seul), SANS injection de réponse DA (`[?…c`) ni ParserError — la
+  // preuve que la taille est synchronisée (pas de corruption) et que le replay est assaini.
+  await p.keyboard.type('[console]::WindowWidth');
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(900);
+  const txt = await termText();
+  const widths = (txt.match(/^\s*(\d{2,3})\s*$/gm) || []).map((s) => parseInt(s, 10)).filter((n) => n >= 20 && n <= 400);
+  const w = widths.length ? widths[widths.length - 1] : null;
+  const noInjection = !/\[\?\d/.test(txt) && !/ParserError|Au caractère/.test(txt);
+  check(w !== null, 'largeur console lisible sur une ligne nette (WindowWidth=' + w + ')');
+  check(noInjection, 'aucune injection de réponse DA / ParserError (rendu non corrompu)');
+
   // reload -> le scrollback persisté/bufferisé doit être rejoué
   await p.reload({ waitUntil: 'networkidle' });
   await p.waitForSelector('.cmp-terminal-host .xterm', { timeout: 10000 });
