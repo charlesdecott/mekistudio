@@ -94,6 +94,28 @@ def test_save_then_load_canvas(tmp_path):
     assert on_disk["viewport"]["x"] == 3
 
 
+def test_ensure_builtin_injects_subcanvas_and_reparents_explorer(tmp_path):
+    import json
+    from mekistudio.backend import bootstrap, paths
+    from mekistudio.backend.models import CanvasState
+    from mekistudio.backend.nodes import (
+        build_chat_node, build_file_explorer_node, build_gitbranch_node, build_kernel_node,
+    )
+    k = build_kernel_node()
+    g = build_gitbranch_node(); g.source_id = k.id
+    c = build_chat_node(); c.source_id = g.id
+    e = build_file_explorer_node(); e.source_id = g.id
+    paths.meki_dir(tmp_path).mkdir(parents=True, exist_ok=True)
+    paths.canvas_path(tmp_path).write_text(
+        json.dumps(CanvasState(nodes=[k, g, c, e]).model_dump(mode="json")), encoding="utf-8"
+    )
+    bootstrap.ensure_meki_dir(tmp_path)
+    state = bootstrap.load_canvas(tmp_path)
+    by = {n.kind: n for n in state.nodes}
+    assert "subcanvas" in by                                   # réinjecté
+    assert by["fileexplorer"].source_id == by["subcanvas"].id  # rangé dans le cadre
+
+
 def test_ensure_builtin_relinks_when_kernel_missing(tmp_path):
     # canvas hérité : explorateur SANS kernel et source_id pointant un id mort.
     import json

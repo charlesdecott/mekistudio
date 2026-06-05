@@ -260,3 +260,29 @@ def test_build_subcanvas_node_structure():
 def test_build_node_includes_subcanvas():
     from mekistudio.backend.nodes import SUBCANVAS_KIND, build_node
     assert build_node(SUBCANVAS_KIND).kind == SUBCANVAS_KIND
+
+
+def test_reconcile_migrates_legacy_explorer_into_subcanvas():
+    # Canvas legacy (brique G) : explorateur encore pendu à git, mais le subcanvas existe déjà
+    # dans l'état (réinjecté par bootstrap). reconcile doit ranger l'explorateur dans le cadre.
+    from mekistudio.backend.models import CanvasState
+    from mekistudio.backend.nodes import (
+        build_chat_node,
+        build_file_explorer_node,
+        build_gitbranch_node,
+        build_kernel_node,
+        build_subcanvas_node,
+        reconcile_source_links,
+    )
+    k = build_kernel_node()
+    g = build_gitbranch_node(); g.source_id = k.id
+    sc = build_subcanvas_node(); sc.source_id = g.id
+    c = build_chat_node(); c.source_id = g.id
+    e = build_file_explorer_node(); e.source_id = g.id  # legacy : sous git
+    state = CanvasState(nodes=[k, g, sc, c, e])
+    reconcile_source_links(state)
+    by = {n.kind: n for n in state.nodes}
+    assert by["fileexplorer"].source_id == by["subcanvas"].id  # migré dans le cadre
+    assert by["subcanvas"].source_id == by["gitbranch"].id
+    reconcile_source_links(state)  # idempotent
+    assert by["fileexplorer"].source_id == by["subcanvas"].id
