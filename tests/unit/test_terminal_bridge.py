@@ -61,6 +61,45 @@ async def test_bridge_attach_replays_ring(tmp_path):
     await bridge.shutdown()
 
 
+async def test_created_at_ms_preserved_across_restart(tmp_path):
+    store = TerminalStore(tmp_path, "tc")
+    bridge = TerminalBridge("tc", store, repo_root=tmp_path)
+    await bridge.start()
+    q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    await bridge.attach(q, 0)
+    bridge.write("Write-Output keepts\r\n")
+    await _drain_until(q, "keepts")
+    await bridge.shutdown()
+    created = store.meta().get("created_at_ms")
+    assert created is not None
+    # "restart" : un nouveau bridge sur le même store doit conserver le created_at_ms
+    bridge2 = TerminalBridge("tc", store, repo_root=tmp_path)
+    await bridge2.start()
+    q2: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    await bridge2.attach(q2, 0)
+    bridge2.write("Write-Output again\r\n")
+    await _drain_until(q2, "again")
+    await bridge2.shutdown()
+    assert store.meta().get("created_at_ms") == created  # pas régénéré
+
+
+async def test_attach_stale_since_seq_replays_full(tmp_path):
+    # simule un restart : le client garde un lastSeq élevé alors que le ring rechargé repart bas
+    store = TerminalStore(tmp_path, "ts")
+    store.save_scrollback("ancienne sortie persistée\r\n")
+    bridge = TerminalBridge("ts", store, repo_root=tmp_path)
+    await bridge.start()
+    q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    await bridge.attach(q, 9999)  # since_seq périmé -> doit rejouer tout le ring
+    got = ""
+    while not q.empty():
+        ev = q.get_nowait()
+        if ev.get("type") == "output":
+            got += ev["data"]
+    assert "ancienne sortie persistée" in got
+    await bridge.shutdown()
+
+
 async def test_manager_get_or_create_same_bridge(tmp_path):
     mgr = TerminalManager(tmp_path)
     b1 = await mgr.get_or_create("x")

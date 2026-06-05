@@ -39,6 +39,7 @@
     }
 
     function connect() {
+      if (destroyed) return; // défense : un reconnect en vol ne ressuscite pas une vue détruite
       const myGen = ++generation;
       intentionalClose = false;
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';

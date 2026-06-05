@@ -15,6 +15,12 @@ class ScrollbackRing:
         self._next_seq = 1
         self._size = 0  # somme des longueurs des chunks
 
+    @property
+    def next_seq(self) -> int:
+        """Prochain seq à attribuer. Un `since_seq` client >= next_seq est périmé (ex.
+        après un restart serveur : le ring rechargé repart à 1) -> replay complet attendu."""
+        return self._next_seq
+
     def append(self, text: str) -> dict:
         """Ajoute un chunk, renvoie l'event wire `{"type":"output","seq","data"}`."""
         seq = self._next_seq

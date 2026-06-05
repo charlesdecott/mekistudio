@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+
+log = logging.getLogger(__name__)
 
 from mekistudio.backend.chat.bridge import default_client_factory
 from mekistudio.backend.chat.manager import ChatManager
@@ -20,8 +24,16 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
-        await app.state.chat_manager.shutdown()
-        await app.state.terminal_manager.shutdown()
+        # Chaque arrêt est ISOLÉ : un échec du chat ne doit pas empêcher le terminate()
+        # des PTY (sinon des PowerShell orphelins fuient à chaque arrêt).
+        results = await asyncio.gather(
+            app.state.chat_manager.shutdown(),
+            app.state.terminal_manager.shutdown(),
+            return_exceptions=True,
+        )
+        for exc in results:
+            if isinstance(exc, Exception):
+                log.warning("erreur à l'arrêt d'un manager : %s", exc)
 
 
 def create_app(repo_root: Path | None = None, *, chat_client_factory=None) -> FastAPI:

@@ -42,8 +42,10 @@ class TerminalBridge:
         self._error_message: str | None = None
         self._cols = 80
         self._rows = 24
+        self._created_at_ms = None  # capturé au start (préservé d'un flush à l'autre)
         self._dirty = False
         self._last_flush = 0.0
+        self._flush_handle = None  # timer call_later du flush traînant (au plus 1 armé)
         self._closed = False
 
     @property
@@ -60,6 +62,7 @@ class TerminalBridge:
         meta = self._store.meta()
         self._cols = int(meta.get("cols") or 80)
         self._rows = int(meta.get("rows") or 24)
+        self._created_at_ms = meta.get("created_at_ms")  # stable (persisté), pas régénéré au flush
         try:
             self._spawn()
         except Exception as exc:  # pywinpty absent / shell introuvable -> dégradé, pas d'exception
@@ -134,19 +137,28 @@ class TerminalBridge:
                 if d is not None:
                     d.set()
 
-    # --- persistance débouncée ---
+    # --- persistance débouncée (leading-edge + flush traînant) ---
     def _schedule_flush(self) -> None:
         self._dirty = True
         if time.monotonic() - self._last_flush >= FLUSH_INTERVAL:
             self._flush_now()
+        elif self._flush_handle is None and self._loop is not None and not self._loop.is_closed():
+            # arme UN flush traînant : sinon une dernière rafale qui se tait dans la fenêtre de
+            # debounce ne serait persistée qu'au prochain output / exit / shutdown.
+            self._flush_handle = self._loop.call_later(FLUSH_INTERVAL, self._flush_now)
 
     def _flush_now(self) -> None:
+        if self._flush_handle is not None:
+            self._flush_handle.cancel()
+            self._flush_handle = None
         if not self._dirty:
             return
         try:
             self._store.save_scrollback(self._ring.text())
-            self._store.save_meta({"id": self._tid, "shell": "powershell",
-                                   "cols": self._cols, "rows": self._rows})
+            meta = {"id": self._tid, "shell": "powershell", "cols": self._cols, "rows": self._rows}
+            if self._created_at_ms is not None:
+                meta["created_at_ms"] = self._created_at_ms  # préservé (pas régénéré à chaque flush)
+            self._store.save_meta(meta)
         except OSError:
             pass
         self._dirty = False
@@ -164,6 +176,10 @@ class TerminalBridge:
             except Exception as exc:
                 self._state = "error"
                 self._append_synthetic(f"\r\n[relance impossible : {exc}]\r\n")
+        # since_seq périmé (>= prochain seq du ring) : arrive après un restart serveur (ring
+        # rechargé repart à 1) si le client garde son ancien lastSeq -> replay COMPLET.
+        if since_seq >= self._ring.next_seq:
+            since_seq = 0
         # Replay (put bloquant hors section critique) puis abonnement live.
         for ev in self._ring.since(since_seq):
             await queue.put(ev)
@@ -187,16 +203,16 @@ class TerminalBridge:
     def resize(self, cols: int, rows: int) -> None:
         self._cols = int(cols)
         self._rows = int(rows)
-        self._dirty = True
         if self._pty is not None and self._alive:
             try:
                 self._pty.setwinsize(self._rows, self._cols)
             except Exception:
                 pass
+        self._schedule_flush()  # persiste les nouvelles dimensions (débouncé), même terminal au repos
 
     async def shutdown(self) -> None:
         self._closed = True
-        self._flush_now()
+        self._flush_now()  # persiste la dernière sortie + annule le timer de flush traînant
         if self._pty is not None:
             try:
                 self._pty.terminate(force=True)

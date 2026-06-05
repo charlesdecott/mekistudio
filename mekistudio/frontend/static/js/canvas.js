@@ -2006,10 +2006,13 @@ document.addEventListener('alpine:init', () => {
     // Monte la vue terminal (window.MekiTerminal : xterm.js + WS /ws/term) et l'indexe par
     // node id pour la détruire (fermer la WS + xterm) au re-render / retrait.
     mountTerminal(host, comp, node) {
-      if (!window.MekiTerminal || !window.Terminal) {
+      if (!window.MekiTerminal || !window.Terminal || !window.FitAddon) {
         host.textContent = 'Terminal indisponible (xterm non chargé).';
         return;
       }
+      // idempotent : détruit un éventuel handle résiduel pour ce node (sinon WS + xterm
+      // fuiraient si un futur chemin re-rendait sans passer par destroyViews/rerenderNode).
+      if (node && node.id && this._termViews[node.id]) this._termViews[node.id].destroy();
       const view = window.MekiTerminal.mount(host, comp.terminal_id, comp);
       if (node && node.id) this._termViews[node.id] = view;
     },
