@@ -76,7 +76,8 @@ document.addEventListener('alpine:init', () => {
     // chaque node placé devient obstacle pour les suivants. Persiste les déplacés.
     reconcileOverlaps() {
       const C = window.MekiCollision;
-      const wraps = [...this.$root.querySelectorAll('.node-wrap')];
+      const contained = this._containedIds();
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => !contained.has(w.dataset.id));
       const fixed = wraps.filter((w) => w.dataset.movable === 'false');
       const movable = wraps.filter((w) => w.dataset.movable !== 'false')
         .sort((a, b) => (a.dataset.id < b.dataset.id ? -1 : 1));
@@ -550,6 +551,17 @@ document.addEventListener('alpine:init', () => {
       return true;
     },
 
+    // Brique H : ids des descendants du cadre subcanvas, lus de l'arbre data-source (dispo dès le rendu,
+    // même avant le 1er relayout). Sert à exclure les contenus de la collision du canvas principal.
+    _containedIds() {
+      const S = window.MekiSubcanvas;
+      const sc = this.$root.querySelector('.node-wrap[data-kind="subcanvas"]');
+      if (!S || !sc) return new Set();
+      const links = [];
+      this.$root.querySelectorAll('.node-wrap').forEach((w) => links.push({ id: w.dataset.id, source: w.dataset.source || '' }));
+      return new Set(S.descendants(links, sc.dataset.id));
+    },
+
     // Coaléscer les relayouts d'une RAFALE de spawns (applyIntent n'await pas -> spawns concurrents) en
     // UN seul passage sur l'ensemble complet : l'état persisté est convergé (pas de snap au 1er reload)
     // et on n'émet qu'un seul lot de POST. Boot appelle relayoutZones() directement (pas une rafale).
@@ -625,7 +637,9 @@ document.addEventListener('alpine:init', () => {
           // PASSE FINALE (seule autorité de l'invariant) : tout voisin dont le home recoupe
           // la box finale de A est RELOGÉ définitivement (findFreeSpot) ; les autres reviennent.
           const finalA = { x: node.x, y: node.y, w: wrap.offsetWidth, h: wrap.offsetHeight };
-          const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap);
+          const contained = this._containedIds();
+      const draggedInside = contained.has(wrap.dataset.id);
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
           const obstacles = [finalA];
           for (const w of wraps) {
             const home = this._homeBox(w);
@@ -688,7 +702,9 @@ document.addEventListener('alpine:init', () => {
       const C = window.MekiCollision;
       const moverBox = { x: node.x, y: node.y, w: orig.w, h: orig.h };
       const decided = [];
-      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap);
+      const contained = this._containedIds();
+      const draggedInside = contained.has(wrap.dataset.id);
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
       const clampA = (home) => {
         const cl = C.clampAgainst({ x: orig.x, y: orig.y },
           { x: node.x, y: node.y, w: orig.w, h: orig.h }, home, C.GAP);
@@ -725,7 +741,9 @@ document.addEventListener('alpine:init', () => {
     _pushOnResize(wrap, node) {
       const C = window.MekiCollision;
       const grown = { x: node.x, y: node.y, w: node.w, h: node.h };
-      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap);
+      const contained = this._containedIds();
+      const draggedInside = contained.has(wrap.dataset.id);
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
       for (const w of wraps) {
         if (w.dataset.movable === 'false') continue;
         const home = this._homeBox(w);
