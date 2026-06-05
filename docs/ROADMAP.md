@@ -117,6 +117,19 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     (chaîne, groupement, placement STABLE, compaction, fermeture, git, réduction, comète-dossiers).
     Revue adversariale → défauts corrigés.
     Spec/plan : `docs/superpowers/{specs,plans}/2026-06-01-node-org-refactor-brick-g*` + `…-organic-neuron-layout-design`.
+  - **Brique H — node subcanvas** (livré, 2026-06-05) : nouvelle topologie
+    **`kernel → git → { chat, subcanvas → explorateur }`**. **Cadre réductible générique** qui confine le
+    monde de l'explorateur (explorateur + dossiers + éditeurs) : ses bornes sont **dérivées** de la
+    bounding-box de son sous-arbre (`MekiSubcanvas.derivedBounds`, module pur `subcanvas.js`, testé
+    `node --test`) ; les descendants sont taggés `data-contained` et **exclus** de la collision
+    principale — le cadre participe comme **une seule boîte**. Layout interne inchangé (`separatePolys` +
+    radial). Réduction → tuile (`contained-hidden` sur les descendants, câbles/territories internes
+    sautés). **Migration auto** : `_ensure_builtin_nodes` injecte le subcanvas dans les canvas
+    existants ; `reconcile_source_links` re-parent l'explorateur (git → subcanvas). Câbles : `git →
+    subcanvas` (externe, bleu/ambre) + `subcanvas → explorateur` (interne). Validé pytest
+    (node/topologie/migration) + `node --test` (`subcanvas.js`) + Playwright (`pw-subcanvas.mjs`).
+    Futur : un subcanvas par worktree git (imbriqué). Spec/plan :
+    `docs/superpowers/{specs,plans}/2026-06-05-subcanvas-node*`.
   - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
     `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.

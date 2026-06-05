@@ -30,7 +30,7 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
 - **`nodes/`** — fabriques + registre. `kernel.py`, `gitbranch.py`, `file_explorer.py`,
   `file_editor.py`, `chat.py`, `folder.py` exposent chacun `KIND` + `build_*_node(...)`.
   `registry.py` : `NODE_BUILDERS`, `build_node`, `default_canvas()` (built-in = **kernel → git →
-  { chat, explorateur }**), `reconcile_constraints(state)`. **Parentage des câbles** : par KIND
+  { chat, subcanvas → explorateur }**), `reconcile_constraints(state)`. **Parentage des câbles** : par KIND
   (`CANONICAL_PARENT_KIND`/`canonical_parent_id`) pour kernel/git/chat/explorateur ; **path-aware**
   (préfixe de chemin) pour `folder`/`fileeditor` via `node_effective_path` + `derive_source_id` +
   le module **pur** `parenting.py` (`is_prefix`, `longest_prefix_id`). `reconcile_source_links(state)`
@@ -40,8 +40,10 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   dirty, ahead, behind}` via subprocess git **non mutant**, `cwd=root`, `timeout`, **tolérant**
   (hors repo / git absent → `branch=None`, jamais d'exception). `ahead/behind` calculés en LOCAL.
 - **`bootstrap.py`** — `ensure_meki_dir` (+ `_ensure_builtin_nodes` qui rajoute les built-in
-  manquants — dont la node git — puis `reconcile_source_links`) ; `load_canvas` (corrupt-safe ;
-  `reconcile_constraints` puis `reconcile_source_links`) ; `save_canvas`/`_write_json` (atomique).
+  manquants — dont la node git et le subcanvas — puis `reconcile_source_links`) ; `load_canvas`
+  (corrupt-safe ; `reconcile_constraints` puis `reconcile_source_links`) ; `save_canvas`/`_write_json`
+  (atomique). **Migration `subcanvas` automatique** : un canvas antérieur à la brique H reçoit la node
+  subcanvas à l'injection ; `reconcile_source_links` re-parent l'explorateur (git → subcanvas).
 - **`fs.py`** — accès fichiers **sandboxé** au repo : `list_dir(root, rel, excludes)`,
   `read_file` (garde binaire/taille `MAX_FILE_BYTES`/UTF-8), `write_file` (fichier
   existant, atomique), `is_file_in_root`.
@@ -92,6 +94,13 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   l'extérieur — chaîne droite, fourche en cône ; enfants triés par `sortKey`=chemin → reproductible),
   `packAround` (range les fichiers en ANNEAU autour de la tuile 📁), `freestAngle`, et `solve`/
   `packOutward` (réserve, non câblés). La dé-collision est dans `territories.js` (`separatePolys`, MTV).
+- **`static/js/subcanvas.js`** — géométrie **pure** du cadre `subcanvas` (`window.MekiSubcanvas`,
+  testé `node --test`, brique H) : `descendants(id, nodes)` (liste récursive de tous les descendants
+  d'un node via `source_id`) et `derivedBounds(id, nodes, domBoxes, {padding, titleH})` (bounding-box
+  du sous-arbre + padding + bande titre 26 px → position/taille du cadre). Consommé par
+  `canvas.js` `_sizeSubcanvas()`, appelé en fin de `relayoutZones`. Les descendants sont marqués
+  `data-contained` dans le DOM et **exclus** de la collision principale (`reconcileOverlaps` +
+  listes d'obstacles drag/resize via `_containedIds()`) ; le cadre participe comme **une seule boîte**.
 - **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
   `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
   `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
@@ -115,7 +124,12 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   `_findFolderForPath`/`_nearestFolderAnchor`, **masquage dérivé** (`fs-claimed` : un dossier de
   l'arbre qui a sa node est masqué), sortie manuelle (clic-droit → `openFolderAsNode`), fermeture
   non destructive (`closeFolderNode`, enfants rebranchés au grand-parent ; shift = cascade).
-  **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier).
+  **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier +
+  subcanvas). **Cadre `subcanvas`** (brique H) : `_sizeSubcanvas()` (appelé en fin de
+  `relayoutZones`) calcule les bornes dérivées via `MekiSubcanvas.derivedBounds` et les applique ;
+  les descendants (`data-contained`) sont **exclus** de `reconcileOverlaps` et des listes
+  d'obstacles ; réduction → `contained-hidden` sur les descendants, câbles/territories internes
+  sautés ; le câble `git → subcanvas` est externe, `subcanvas → explorateur` est interne.
   **Node git** : `refreshGit` (charge `/api/git/branch` au boot et sur `meki:turn-end`).
   **Placement par ARBRE RADIAL (node-zones)** : chaque dossier est une *node-zone* (tuile 📁 au centre,
   fichiers directs en ANNEAU via `packAround`, `folderBlobCorners` inclut la tuile). `relayoutZones`
@@ -153,6 +167,11 @@ Dépendances réseau externes (assumées) : Alpine (unpkg), CodeMirror (esm.sh).
   (explorateur ∪ dossiers) au **plus long préfixe de chemin** ; le reste par kind. `reconcile_source_links`
   est la source de vérité (idempotent, déterministe) — un node dossier supprimé voit ses enfants
   rebranchés automatiquement au reload.
+- **Cadre `subcanvas` = bornes dérivées** (brique H) : la géométrie du cadre n'est JAMAIS persistée
+  comme vérité — elle est recalculée à chaque `relayoutZones` à partir de la bounding-box du sous-arbre
+  (descendants via `MekiSubcanvas.descendants`). Les coordonnées des descendants restent **absolues** ;
+  le cadre enveloppe exactement son sous-arbre. La collision principale ne voit que le cadre (une boîte),
+  pas ses descendants (`data-contained`/`_containedIds()`).
 - **Zéro-recouvrement** des zones maintenu : dé-collision par polygones `MekiTerritories.separatePolys`
   (MTV, VIDE garanti entre blobs dessinés) + collision douce au move/resize/spawn + réconciliation au boot ; le
   `kernel` (`movable:false`) fait office de **mur**. Les nodes **se ré-arrangent en douceur** (animé,
