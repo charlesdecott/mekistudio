@@ -26,6 +26,7 @@ document.addEventListener('alpine:init', () => {
     _materializingDepth: 0,  // >0 tant qu'un auto-spawn matérialise -> les dossiers naissent invisibles (comète). Compteur (spawns concurrents).
     _editors: {},            // états des nodes éditeur, indexés par node id
     _chatViews: {},          // handles des vues chat (WS), indexés par node id
+    _termViews: {},          // handles des vues terminal (xterm + WS), indexés par node id
     _zTop: 0,                // dernier z-index attribué (premier plan au clic)
     panning: false,
     last: { x: 0, y: 0 },
@@ -101,10 +102,12 @@ document.addEventListener('alpine:init', () => {
     renderNodes(nodes) {
       const world = this.$root.querySelector('.world');
       if (!world) return;
-      // détruire les vues chat existantes AVANT de remplacer le DOM (sinon WS + timer
-      // de backoff fuient vers un DOM détaché — cas du boot/reload).
+      // détruire les vues chat/terminal existantes AVANT de remplacer le DOM (sinon WS +
+      // timer de backoff + xterm fuient vers un DOM détaché — cas du boot/reload).
       Object.values(this._chatViews).forEach((v) => v && v.destroy());
       this._chatViews = {};
+      Object.values(this._termViews).forEach((v) => v && v.destroy());
+      this._termViews = {};
       world.replaceChildren(...nodes.map((n) => this.renderNode(n)));
     },
     renderNode(node) {
@@ -1358,6 +1361,7 @@ document.addEventListener('alpine:init', () => {
       const wrap = this.$root.querySelector('.node-wrap[data-id="' + node.id + '"]');
       if (!wrap) return;
       if (this._chatViews[node.id]) { this._chatViews[node.id].destroy(); delete this._chatViews[node.id]; }
+      if (this._termViews[node.id]) { this._termViews[node.id].destroy(); delete this._termViews[node.id]; }
       wrap.replaceChildren(this.renderComponent(node.root, node));
       if (node.configurable) wrap.appendChild(this.makeGear(node));
     },
@@ -1959,6 +1963,15 @@ document.addEventListener('alpine:init', () => {
         this.mountChat(el, c, node);
         return el;
       }
+      if (c.type === 'terminal') {
+        const el = document.createElement('div');
+        el.className = 'cmp-terminal-host';
+        // molette -> scroll du terminal (pas zoom canvas) ; mousedown reste au node-wrap
+        // SAUF capture clavier : xterm gère le focus via son textarea interne.
+        el.addEventListener('wheel', (ev) => ev.stopPropagation());
+        this.mountTerminal(el, c, node);
+        return el;
+      }
       if (c.type === 'gitbranch') {
         // brique G : titre (⎇ branche, vue minimale gardée quand réduit) + détail (ahead/behind/modifs).
         const el = document.createElement('div');
@@ -1988,6 +2001,17 @@ document.addEventListener('alpine:init', () => {
       }
       const view = window.MekiChatView.mount(host, comp.conversation_id, comp);
       if (node && node.id) this._chatViews[node.id] = view;
+    },
+
+    // Monte la vue terminal (window.MekiTerminal : xterm.js + WS /ws/term) et l'indexe par
+    // node id pour la détruire (fermer la WS + xterm) au re-render / retrait.
+    mountTerminal(host, comp, node) {
+      if (!window.MekiTerminal || !window.Terminal) {
+        host.textContent = 'Terminal indisponible (xterm non chargé).';
+        return;
+      }
+      const view = window.MekiTerminal.mount(host, comp.terminal_id, comp);
+      if (node && node.id) this._termViews[node.id] = view;
     },
 
     // --- explorateur de fichiers (chargement paresseux via /api/fs) ---

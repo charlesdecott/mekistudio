@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ project_name }} — mekistudio</title>
   <link rel="stylesheet" href="/static/css/canvas.css">
+  <!-- xterm.js (terminal) : feuille de style + UMD vendorés (window.Terminal / window.FitAddon). -->
+  <link rel="stylesheet" href="/static/vendor/xterm.css">
   <script>window.__PROJECT_NAME__ = {{ project_name | tojson }};</script>
   <!-- racine du repo (posix) : permet de normaliser un chemin lu ABSOLU (hook Read Windows)
        en chemin RELATIF posix -> clé de dossier canonique (anti-doublons). -->
@@ -33,6 +35,11 @@
   <script defer src="/static/vendor/purify.min.js"></script>
   <script defer src="/static/js/chat-model.js"></script>
   <script defer src="/static/js/chat-view.js"></script>
+  <!-- terminal : xterm UMD + fit addon (vendorés) puis la vue ; AVANT canvas.js -> window.Terminal
+       /FitAddon/MekiTerminal sont prêts au 1er rendu de la branche terminal de renderComponent. -->
+  <script defer src="/static/vendor/xterm.js"></script>
+  <script defer src="/static/vendor/xterm-addon-fit.js"></script>
+  <script defer src="/static/js/terminal-view.js"></script>
   <script defer src="/static/js/canvas.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <!-- éditeur CodeMirror : module ESM, expose window.MekiEditor (chargé en async). -->
