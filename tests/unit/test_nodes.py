@@ -250,8 +250,9 @@ def test_build_subcanvas_node_structure():
     from mekistudio.backend.nodes import SUBCANVAS_KIND, build_subcanvas_node
     n = build_subcanvas_node()
     assert n.kind == SUBCANVAS_KIND == "subcanvas"
-    # cadre dérivé : ni déplaçable, ni redimensionnable, ni configurable ; réductible via collapsed.
-    assert n.movable is False and n.resizable is False and n.configurable is False
+    # cadre déplaçable (le drag entraîne le contenu), non redimensionnable au handle (bornes
+    # dérivées), non configurable ; réductible via collapsed.
+    assert n.movable is True and n.resizable is False and n.configurable is False
     assert n.collapsed is False
     header = n.root.children[0].children[0]
     assert isinstance(header, HeaderComponent)

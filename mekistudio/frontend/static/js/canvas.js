@@ -78,8 +78,11 @@ document.addEventListener('alpine:init', () => {
       const C = window.MekiCollision;
       const contained = this._containedIds();
       const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => !contained.has(w.dataset.id));
-      const fixed = wraps.filter((w) => w.dataset.movable === 'false');
-      const movable = wraps.filter((w) => w.dataset.movable !== 'false')
+      // Brique H : le cadre subcanvas est un MUR (les autres s'arrêtent contre lui), jamais relogé,
+      // même s'il est déplaçable au drag direct -> il va dans `fixed`, pas dans `movable`.
+      const isWall = (w) => w.dataset.movable === 'false' || w.dataset.kind === 'subcanvas';
+      const fixed = wraps.filter(isWall);
+      const movable = wraps.filter((w) => !isWall(w))
         .sort((a, b) => (a.dataset.id < b.dataset.id ? -1 : 1));
       const placed = fixed.map((w) => this._homeBox(w));
       for (const w of movable) {
@@ -626,11 +629,23 @@ document.addEventListener('alpine:init', () => {
         y: node.y || 0,
         // taille auto -> taille rendue. offsetWidth ignore le transform scale()
         // de .world : c'est déjà en coords monde (donc pas de division par z).
-        w: node.w != null ? node.w : wrap.offsetWidth,
-        h: node.h != null ? node.h : wrap.offsetHeight,
+        // Brique H : le cadre subcanvas n'a pas de taille propre fiable (node.w/h périmés, bornes
+        // dérivées) -> on prend sa taille RENDUE pour le drag/collision.
+        w: (node.kind === 'subcanvas' || node.w == null) ? wrap.offsetWidth : node.w,
+        h: (node.kind === 'subcanvas' || node.h == null) ? wrap.offsetHeight : node.h,
       };
       let moved = false;
       let done = false;
+      // Brique H : contexte de drag groupé. draggingFrame = on déplace le cadre (entraîne tout son
+      // contenu) ; draggingContained = on déplace un node interne (le cadre se redimensionne live).
+      const draggingFrame = moving && node.kind === 'subcanvas';
+      // move OU resize d'un node interne -> le cadre se recale (grossit/rétrécit) sur le contenu.
+      const draggingContained = (moving || resizing) && this._containedIds().has(wrap.dataset.id);
+      const frameKids = [];
+      if (draggingFrame) {
+        const ci = this._containedIds();
+        this.$root.querySelectorAll('.node-wrap').forEach((w) => { if (ci.has(w.dataset.id)) frameKids.push(w); });
+      }
       const finish = () => {
         if (done) return;
         done = true;
@@ -645,11 +660,11 @@ document.addEventListener('alpine:init', () => {
           const finalA = { x: node.x, y: node.y, w: wrap.offsetWidth, h: wrap.offsetHeight };
           const contained = this._containedIds();
           const draggedInside = contained.has(wrap.dataset.id);
-          const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
+          const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && (draggedInside ? contained.has(w.dataset.id) : !contained.has(w.dataset.id)));
           const obstacles = [finalA];
           for (const w of wraps) {
             const home = this._homeBox(w);
-            if (w.dataset.movable === 'false') { this.clearTranslate(w); obstacles.push(home); continue; }
+            if (w.dataset.movable === 'false' || w.dataset.kind === 'subcanvas') { this.clearTranslate(w); obstacles.push(home); continue; }
             if (C.intersects(finalA, home, C.GAP)) {
               const others = obstacles.concat(wraps.filter((o) => o !== w).map((o) => this._homeBox(o)));
               const pushed = this.boxOf(w);   // là où il a DÉJÀ été poussé pendant le drag
@@ -661,6 +676,14 @@ document.addEventListener('alpine:init', () => {
               obstacles.push({ x: spot.x, y: spot.y, w: home.w, h: home.h });
               relogged.push(w.dataset.id);
             } else { this.clearTranslate(w); obstacles.push(home); }
+          }
+          if (draggingFrame) {
+            // déplacer le cadre = figer le contenu translaté à sa position monde finale + persister.
+            frameKids.forEach((w) => {
+              const nx = (parseFloat(w.style.left) || 0) + (w._tx || 0), ny = (parseFloat(w.style.top) || 0) + (w._ty || 0);
+              this.clearTranslate(w); w.style.left = nx + 'px'; w.style.top = ny + 'px';
+              this._persistPos(w.dataset.id, nx, ny);
+            });
           }
         } else if (resizing && moved) {
           // pousse-et-reste : fige les voisins poussés en home définitif (D3), persiste.
@@ -677,7 +700,10 @@ document.addEventListener('alpine:init', () => {
           const w = this.$root.querySelector('.node-wrap[data-id="' + id + '"]');
           if (w) this._persistPos(id, parseFloat(w.style.left) || 0, parseFloat(w.style.top) || 0);
         }
-        if (moved) this.persistNode(node); // A persisté en DERNIER (cohérence si échec réseau partiel)
+        // A persisté en DERNIER (cohérence si échec réseau partiel). Le cadre subcanvas n'est PAS
+        // redimensionnable -> on ne persiste que sa position (sinon la route 422 sur w/h).
+        if (moved) { if (draggingFrame) this._persistPos(node.id, node.x, node.y); else this.persistNode(node); }
+        if (draggingFrame || draggingContained) this._sizeSubcanvas(); // cadre recalé sur le contenu final
         this.drawCables();
       };
       const onMove = (ev) => {
@@ -690,9 +716,18 @@ document.addEventListener('alpine:init', () => {
           node.w = this.clampW(node, orig.w + dx);
           node.h = this.clampH(node, orig.h + dy);
         }
-        this.applyBox(wrap, node);
-        if (moving) this._pushNeighbors(wrap, node, orig); // écarte les voisins (peut clamper A)
+        // Brique H : le cadre garde sa taille DÉRIVÉE (ne pas la réécrire depuis node.w/h via applyBox).
+        if (draggingFrame) { wrap.style.left = node.x + 'px'; wrap.style.top = node.y + 'px'; }
+        else this.applyBox(wrap, node);
+        if (moving) this._pushNeighbors(wrap, node, orig); // écarte les voisins (peut clamper A — murs)
         if (resizing) this._pushOnResize(wrap, node);      // pousse bas/droite (peut borner la taille)
+        if (draggingFrame) {
+          // déplacer le cadre = translater TOUT son contenu du même delta (clampé aux murs par _pushNeighbors).
+          wrap.style.left = node.x + 'px'; wrap.style.top = node.y + 'px';
+          const adx = node.x - orig.x, ady = node.y - orig.y;
+          frameKids.forEach((w) => this.setTranslate(w, adx, ady));
+        }
+        if (draggingContained) this._sizeSubcanvas(); // node interne bougé -> le cadre grossit/rétrécit live
         this.drawCables();                                  // re-route live (positions rendues)
       };
       document.addEventListener('mousemove', onMove);
@@ -710,7 +745,7 @@ document.addEventListener('alpine:init', () => {
       const decided = [];
       const contained = this._containedIds();
       const draggedInside = contained.has(wrap.dataset.id);
-      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && (draggedInside ? contained.has(w.dataset.id) : !contained.has(w.dataset.id)));
       const clampA = (home) => {
         const cl = C.clampAgainst({ x: orig.x, y: orig.y },
           { x: node.x, y: node.y, w: orig.w, h: orig.h }, home, C.GAP);
@@ -724,7 +759,7 @@ document.addEventListener('alpine:init', () => {
           decided.push(this.boxOf(w));
           continue;
         }
-        if (w.dataset.movable === 'false') { clampA(home); decided.push(home); continue; }
+        if (w.dataset.movable === 'false' || w.dataset.kind === 'subcanvas') { clampA(home); decided.push(home); continue; }
         const obstacles = [moverBox, ...decided];
         wraps.forEach((o) => {
           if (o === w || o._tx || o._ty) return;
@@ -749,9 +784,9 @@ document.addEventListener('alpine:init', () => {
       const grown = { x: node.x, y: node.y, w: node.w, h: node.h };
       const contained = this._containedIds();
       const draggedInside = contained.has(wrap.dataset.id);
-      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
+      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && (draggedInside ? contained.has(w.dataset.id) : !contained.has(w.dataset.id)));
       for (const w of wraps) {
-        if (w.dataset.movable === 'false') continue;
+        if (w.dataset.movable === 'false' || w.dataset.kind === 'subcanvas') continue;
         const home = this._homeBox(w);
         if (!C.intersects(grown, home, C.GAP)) continue;
         const v = C.pushVector(grown, home, C.GAP);

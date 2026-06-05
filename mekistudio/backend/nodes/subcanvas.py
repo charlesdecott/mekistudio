@@ -15,15 +15,17 @@ KIND = "subcanvas"
 
 
 def build_subcanvas_node(x: float = 300.0, y: float = 0.0) -> Node:
-    """Cadre conteneur. Non déplaçable / non redimensionnable (bornes dérivées du
-    contenu côté front) ; réductible (collapsed). Le header porte le titre du cadre."""
+    """Cadre conteneur. **Déplaçable** (le drag entraîne tout son contenu ; côté front il
+    reste un MUR de collision — les autres nodes s'arrêtent contre lui sans le pousser).
+    Non redimensionnable au handle : ses bornes sont DÉRIVÉES du contenu (grossit/rétrécit
+    quand on bouge un node interne). Réductible (collapsed) ; le header porte le titre."""
     return Node(
         kind=KIND,
         x=x,
         y=y,
         w=360.0,
         h=300.0,
-        movable=False,
+        movable=True,
         resizable=False,
         configurable=False,
         root=NodeComponent(
