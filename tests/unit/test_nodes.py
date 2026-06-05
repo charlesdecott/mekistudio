@@ -79,11 +79,11 @@ def test_build_node_by_kind():
 
 
 def test_default_canvas_has_builtin_nodes():
-    # Built-in = kernel + git + explorateur + chat. L'éditeur/dossier sont dynamiques.
+    # Built-in = kernel + git + subcanvas + explorateur + chat.
     canvas = default_canvas()
     assert isinstance(canvas, CanvasState)
     kinds = {n.kind for n in canvas.nodes}
-    assert kinds == {KERNEL_KIND, "gitbranch", FILE_EXPLORER_KIND, "chat"}
+    assert kinds == {KERNEL_KIND, "gitbranch", "subcanvas", FILE_EXPLORER_KIND, "chat"}
 
 
 def test_canvas_with_node_roundtrip():
@@ -104,28 +104,28 @@ def test_canvas_roundtrip_preserves_source_id():
     assert CanvasState.model_validate(state.model_dump(mode="json")).nodes[0].source_id == "abc"
 
 
-def test_default_canvas_git_topology():
-    # Brique G : kernel -> git -> { chat, explorateur }.
-    from mekistudio.backend.nodes import default_canvas
+def test_default_canvas_subcanvas_topology():
+    # Brique H : kernel -> git -> { chat, subcanvas -> explorateur }.
     state = default_canvas()
     by = {n.kind: n for n in state.nodes}
     assert by["kernel"].source_id is None
     assert by["gitbranch"].source_id == by["kernel"].id
-    assert by["fileexplorer"].source_id == by["gitbranch"].id
     assert by["chat"].source_id == by["gitbranch"].id
+    assert by["subcanvas"].source_id == by["gitbranch"].id
+    assert by["fileexplorer"].source_id == by["subcanvas"].id
 
 
 def test_reconcile_source_links_repairs_absent_and_dangling():
     from mekistudio.backend.nodes import default_canvas, reconcile_source_links
     state = default_canvas()
-    g = next(n for n in state.nodes if n.kind == "gitbranch")
+    sc = next(n for n in state.nodes if n.kind == "subcanvas")
     e = next(n for n in state.nodes if n.kind == "fileexplorer")
     e.source_id = None                      # absent
     reconcile_source_links(state)
-    assert e.source_id == g.id              # canonique = git (brique G)
+    assert e.source_id == sc.id             # canonique = subcanvas (brique H)
     e.source_id = "ghost"                   # dangling
     reconcile_source_links(state)
-    assert e.source_id == g.id
+    assert e.source_id == sc.id
     before = e.source_id                     # idempotent
     reconcile_source_links(state)
     assert e.source_id == before
@@ -133,26 +133,31 @@ def test_reconcile_source_links_repairs_absent_and_dangling():
 
 def test_reconcile_migration_reparents_chat_and_explorer_to_git():
     # Canvas legacy : chat & explorateur pendent encore au kernel (mauvais kind).
+    # Brique H : le subcanvas est présent ; l'explorateur migre vers subcanvas (son
+    # parent canonique), et le chat migre vers git.
     from mekistudio.backend.models import CanvasState
     from mekistudio.backend.nodes import (
         build_chat_node,
         build_file_explorer_node,
         build_gitbranch_node,
         build_kernel_node,
+        build_subcanvas_node,
         reconcile_source_links,
     )
     k = build_kernel_node()
     g = build_gitbranch_node()
+    sc = build_subcanvas_node()
     c = build_chat_node()
     e = build_file_explorer_node()
     g.source_id = k.id
-    c.source_id = k.id  # legacy
-    e.source_id = k.id  # legacy
-    state = CanvasState(nodes=[k, g, c, e])
+    sc.source_id = g.id
+    c.source_id = k.id   # legacy : mauvais kind (kernel au lieu de git)
+    e.source_id = k.id   # legacy : mauvais kind (kernel au lieu de subcanvas)
+    state = CanvasState(nodes=[k, g, sc, c, e])
     reconcile_source_links(state)
     by = {n.kind: n for n in state.nodes}
     assert by["chat"].source_id == by["gitbranch"].id
-    assert by["fileexplorer"].source_id == by["gitbranch"].id
+    assert by["fileexplorer"].source_id == by["subcanvas"].id
 
 
 def test_canonical_parent_id():
@@ -160,7 +165,9 @@ def test_canonical_parent_id():
     state = default_canvas()
     k = next(n for n in state.nodes if n.kind == "kernel")
     g = next(n for n in state.nodes if n.kind == "gitbranch")
-    assert canonical_parent_id(state, "fileexplorer") == g.id  # brique G : sous git
+    sc = next(n for n in state.nodes if n.kind == "subcanvas")
+    assert canonical_parent_id(state, "subcanvas") == g.id
+    assert canonical_parent_id(state, "fileexplorer") == sc.id  # brique H : sous le subcanvas
     assert canonical_parent_id(state, "gitbranch") == k.id
     assert canonical_parent_id(state, "kernel") is None
 

@@ -26,11 +26,12 @@ def build_node(kind: str, **kwargs) -> Node:
 
 
 # Parent logique attendu d'un kind (kind -> kind du parent). Source de vérité du
-# parentage PAR KIND. Brique G : git s'insère entre le kernel et chat/explorateur.
+# parentage PAR KIND. Brique H : le cadre subcanvas s'insère entre git et l'explorateur.
 CANONICAL_PARENT_KIND: dict[str, str] = {
     gitbranch.KIND: kernel.KIND,
-    file_explorer.KIND: gitbranch.KIND,  # G : était kernel
-    chat.KIND: gitbranch.KIND,           # G : était kernel
+    subcanvas.KIND: gitbranch.KIND,        # H : le cadre pend à git
+    file_explorer.KIND: subcanvas.KIND,    # H : l'explorateur vit DANS le cadre (était gitbranch)
+    chat.KIND: gitbranch.KIND,
     file_editor.KIND: file_explorer.KIND,  # fallback ; le path-aware prend le dessus s'il y a des dossiers
     folder.KIND: file_explorer.KIND,       # fallback ; idem
 }
@@ -151,13 +152,15 @@ def reconcile_constraints(state: CanvasState) -> CanvasState:
 
 
 def default_canvas() -> CanvasState:
-    """Canvas initial : kernel (racine) -> git -> { chat, explorateur }.
-    Le kernel reste figé à (0,0) ; git en dessous, chat et explorateur plus bas."""
+    """Canvas initial (brique H) : kernel → git → { chat, subcanvas → explorateur }.
+    Le kernel reste figé à (0,0) ; le cadre subcanvas contient l'explorateur."""
     k = kernel.build_kernel_node()
     g = gitbranch.build_gitbranch_node()
     g.source_id = k.id  # git pend au kernel
-    e = file_explorer.build_file_explorer_node(x=300.0, y=240.0)
-    e.source_id = g.id  # l'explorateur pend à git
+    sc = subcanvas.build_subcanvas_node(x=300.0, y=240.0)
+    sc.source_id = g.id  # le cadre pend à git
+    e = file_explorer.build_file_explorer_node(x=360.0, y=300.0)
+    e.source_id = sc.id  # l'explorateur vit dans le cadre
     c = chat.build_chat_node(x=-440.0, y=240.0)
     c.source_id = g.id  # le chat pend aussi à git
-    return CanvasState(nodes=[k, g, e, c])
+    return CanvasState(nodes=[k, g, sc, e, c])
