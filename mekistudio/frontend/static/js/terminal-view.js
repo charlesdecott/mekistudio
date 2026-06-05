@@ -139,18 +139,20 @@
         if (!navigator.clipboard) return;
         navigator.clipboard.readText().then((t) => { if (t) term.paste(t); }).catch(() => {});
       }
-      // Ctrl/Cmd+C : copie la sélection si présente (sinon laisse xterm envoyer \x03 = interrupt).
-      // Ctrl/Cmd+V : colle. Ctrl+Shift+C/V (convention terminal) aussi.
+      // Ctrl/Cmd+C : copie la sélection si présente (sinon on laisse xterm envoyer \x03 = interrupt).
+      // Ctrl/Cmd+V : on colle NOUS-MÊMES et on preventDefault -> ça SUPPRIME l'événement `paste`
+      // natif du navigateur (que xterm écouterait aussi) : exactement UN collage, pas deux.
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true;
         const mod = e.ctrlKey || e.metaKey;
         if (!mod) return true;
         const k = (e.key || '').toLowerCase();
         if (k === 'c' && (term.hasSelection() || e.shiftKey)) { if (copySelection()) return false; }
-        if (k === 'v') { pasteClipboard(); return false; }
+        if (k === 'v' && !e.shiftKey) { e.preventDefault(); pasteClipboard(); return false; }
         return true;
       });
       // Clic droit : colle (réflexe console Windows) — ou copie si une sélection est active.
+      // (contextmenu preventDefault -> pas de menu navigateur ni de collage natif : pas de doublon.)
       container.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         if (term.hasSelection()) copySelection();
