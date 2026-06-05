@@ -524,9 +524,9 @@ document.addEventListener('alpine:init', () => {
     },
 
     // Brique H : dimensionne le cadre subcanvas sur la boîte englobante DÉRIVÉE de son sous-arbre
-    // (explorateur + dossiers + éditeurs), réserve une bande de titre en haut, et MARQUE ses
-    // descendants `data-contained` (exclus de la collision principale). Replié -> tuile + descendants
-    // masqués. Retourne true si le cadre existe.
+    // (explorateur + dossiers + éditeurs), réserve une bande de titre en haut. Replié -> tuile + descendants
+    // masqués (classe `contained-hidden`). L'EXCLUSION de la collision principale se fait à part, via
+    // `_containedIds()` (dérivé de l'arbre `source_id`). Retourne true si le cadre existe.
     _sizeSubcanvas() {
       const S = window.MekiSubcanvas;
       const sc = this.$root.querySelector('.node-wrap[data-kind="subcanvas"]');
@@ -540,7 +540,6 @@ document.addEventListener('alpine:init', () => {
       this.$root.querySelectorAll('.node-wrap').forEach((w) => {
         if (w === sc) return;
         const inside = ids.has(w.dataset.id);
-        w.dataset.contained = inside ? scId : '';
         w.classList.toggle('contained-hidden', inside && !!sc.classList.contains('collapsed'));
         if (inside) wraps.push(w);
       });

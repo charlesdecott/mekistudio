@@ -95,12 +95,14 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   `packAround` (range les fichiers en ANNEAU autour de la tuile 📁), `freestAngle`, et `solve`/
   `packOutward` (réserve, non câblés). La dé-collision est dans `territories.js` (`separatePolys`, MTV).
 - **`static/js/subcanvas.js`** — géométrie **pure** du cadre `subcanvas` (`window.MekiSubcanvas`,
-  testé `node --test`, brique H) : `descendants(id, nodes)` (liste récursive de tous les descendants
-  d'un node via `source_id`) et `derivedBounds(id, nodes, domBoxes, {padding, titleH})` (bounding-box
-  du sous-arbre + padding + bande titre 26 px → position/taille du cadre). Consommé par
-  `canvas.js` `_sizeSubcanvas()`, appelé en fin de `relayoutZones`. Les descendants sont marqués
-  `data-contained` dans le DOM et **exclus** de la collision principale (`reconcileOverlaps` +
-  listes d'obstacles drag/resize via `_containedIds()`) ; le cadre participe comme **une seule boîte**.
+  testé `node --test`, brique H) : `descendants(links, rootId)` où `links` est `[{id, source}]`
+  (ids descendants transitifs, exclut la racine) et `derivedBounds(boxes, {pad, titleH})` où `boxes`
+  est `[{x,y,w,h}]` (bounding-box englobante + pad sur les 4 côtés + bande titre `titleH` réservée
+  en haut → position/taille du cadre, ou null). Consommé par `canvas.js` `_sizeSubcanvas()`, appelé
+  en fin de `relayoutZones`. Les descendants sont **exclus** de la collision principale
+  (`reconcileOverlaps` + listes d'obstacles drag/resize) via `_containedIds()` (dérivé de l'arbre
+  `source_id`) ; replié → classe `contained-hidden` sur les descendants ; le cadre participe comme
+  **une seule boîte**.
 - **`static/js/chat-impulses.js`** — mapping **pur** (`window.MekiImpulses`, testé `node --test`) :
   `impulseFor(ev)` transforme un event wire (`tool_result` enrichi par `{name, file_path}` via
   `toolsById`, `turn_end`, `hook_fired`) en **intention** `{kind:'comet'|'glow', target:{by:'file'|
@@ -127,8 +129,8 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   **Réduire/agrandir** (`collapsed`) : `makeCollapseToggle`/`toggleCollapse` (git + dossier +
   subcanvas). **Cadre `subcanvas`** (brique H) : `_sizeSubcanvas()` (appelé en fin de
   `relayoutZones`) calcule les bornes dérivées via `MekiSubcanvas.derivedBounds` et les applique ;
-  les descendants (`data-contained`) sont **exclus** de `reconcileOverlaps` et des listes
-  d'obstacles ; réduction → `contained-hidden` sur les descendants, câbles/territories internes
+  les descendants sont **exclus** de `reconcileOverlaps` et des listes d'obstacles via `_containedIds()`
+  (dérivé de l'arbre `source_id`) ; réduction → `contained-hidden` sur les descendants, câbles/territories internes
   sautés ; le câble `git → subcanvas` est externe, `subcanvas → explorateur` est interne.
   **Node git** : `refreshGit` (charge `/api/git/branch` au boot et sur `meki:turn-end`).
   **Placement par ARBRE RADIAL (node-zones)** : chaque dossier est une *node-zone* (tuile 📁 au centre,
@@ -171,7 +173,7 @@ Dépendances réseau externes (assumées) : Alpine (unpkg), CodeMirror (esm.sh).
   comme vérité — elle est recalculée à chaque `relayoutZones` à partir de la bounding-box du sous-arbre
   (descendants via `MekiSubcanvas.descendants`). Les coordonnées des descendants restent **absolues** ;
   le cadre enveloppe exactement son sous-arbre. La collision principale ne voit que le cadre (une boîte),
-  pas ses descendants (`data-contained`/`_containedIds()`).
+  pas ses descendants (exclus via `_containedIds()`, dérivé de l'arbre `source_id`).
 - **Zéro-recouvrement** des zones maintenu : dé-collision par polygones `MekiTerritories.separatePolys`
   (MTV, VIDE garanti entre blobs dessinés) + collision douce au move/resize/spawn + réconciliation au boot ; le
   `kernel` (`movable:false`) fait office de **mur**. Les nodes **se ré-arrangent en douceur** (animé,

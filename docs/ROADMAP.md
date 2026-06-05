@@ -121,8 +121,8 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     **`kernel → git → { chat, subcanvas → explorateur }`**. **Cadre réductible générique** qui confine le
     monde de l'explorateur (explorateur + dossiers + éditeurs) : ses bornes sont **dérivées** de la
     bounding-box de son sous-arbre (`MekiSubcanvas.derivedBounds`, module pur `subcanvas.js`, testé
-    `node --test`) ; les descendants sont taggés `data-contained` et **exclus** de la collision
-    principale — le cadre participe comme **une seule boîte**. Layout interne inchangé (`separatePolys` +
+    `node --test`) ; les descendants sont **exclus** de la collision principale via `_containedIds()`
+    (dérivé de l'arbre `source_id`) — le cadre participe comme **une seule boîte**. Layout interne inchangé (`separatePolys` +
     radial). Réduction → tuile (`contained-hidden` sur les descendants, câbles/territories internes
     sautés). **Migration auto** : `_ensure_builtin_nodes` injecte le subcanvas dans les canvas
     existants ; `reconcile_source_links` re-parent l'explorateur (git → subcanvas). Câbles : `git →
