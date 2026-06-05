@@ -511,7 +511,43 @@ document.addEventListener('alpine:init', () => {
           place(it.w, it.x + o.x, it.y + o.y);
         });
       });
+      this._sizeSubcanvas();
       this.drawCables(); this.fitView();
+    },
+
+    // Brique H : dimensionne le cadre subcanvas sur la boîte englobante DÉRIVÉE de son sous-arbre
+    // (explorateur + dossiers + éditeurs), réserve une bande de titre en haut, et MARQUE ses
+    // descendants `data-contained` (exclus de la collision principale). Replié -> tuile + descendants
+    // masqués. Retourne true si le cadre existe.
+    _sizeSubcanvas() {
+      const S = window.MekiSubcanvas;
+      const sc = this.$root.querySelector('.node-wrap[data-kind="subcanvas"]');
+      if (!S || !sc) return false;
+      const scId = sc.dataset.id;
+      // liens (id -> source) lus du DOM -> descendants transitifs du cadre.
+      const links = [];
+      this.$root.querySelectorAll('.node-wrap').forEach((w) => links.push({ id: w.dataset.id, source: w.dataset.source || '' }));
+      const ids = new Set(S.descendants(links, scId));
+      const wraps = [];
+      this.$root.querySelectorAll('.node-wrap').forEach((w) => {
+        if (w === sc) return;
+        const inside = ids.has(w.dataset.id);
+        w.dataset.contained = inside ? scId : '';
+        w.classList.toggle('contained-hidden', inside && !!sc.classList.contains('collapsed'));
+        if (inside) wraps.push(w);
+      });
+      const collapsed = sc.classList.contains('collapsed');
+      if (collapsed || !wraps.length) {
+        // tuile compacte : le header seul (la bande de titre). Position = coin haut-gauche courant.
+        sc.style.width = '200px'; sc.style.height = '34px';
+        return true;
+      }
+      const boxes = wraps.map((w) => this.boxOf(w));
+      const b = S.derivedBounds(boxes, { pad: 22, titleH: 26 });
+      if (!b) return true;
+      sc.style.left = b.x + 'px'; sc.style.top = b.y + 'px';
+      sc.style.width = b.w + 'px'; sc.style.height = b.h + 'px';
+      return true;
     },
 
     // Coaléscer les relayouts d'une RAFALE de spawns (applyIntent n'await pas -> spawns concurrents) en
