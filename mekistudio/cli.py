@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -93,6 +95,48 @@ def _stop_running(root: Path) -> bool:
     return True
 
 
+def _detached_kwargs() -> dict:
+    """Flags pour lancer un process TOTALEMENT détaché : pas de console attachée, propre
+    groupe de process, ne meurt pas avec son parent. Indispensable au redémarrage lancé
+    DEPUIS un terminal mekistudio (enfant du serveur) — sinon l'arrêt du serveur (taskkill
+    /T sur tout l'arbre) tuerait aussi le relanceur avant qu'il ait relancé `serve`."""
+    if sys.platform == "win32":
+        flags = (
+            subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        )
+        return {"creationflags": flags, "close_fds": True}
+    return {"start_new_session": True, "close_fds": True}
+
+
+def _wait_port_free(port: int, host: str = "127.0.0.1", timeout: float = 12.0) -> bool:
+    """Attend que `port` se libère (l'ancien serve relâche le socket). True si libre."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            if s.connect_ex((host, port)) != 0:  # connexion refusée -> port libre
+                return True
+        time.sleep(0.3)
+    return False
+
+
+@app.command("restart-helper", hidden=True)
+def restart_helper(
+    port: int = typer.Option(8777, help="Port du serve relancé."),
+    old_pid: int = typer.Option(0, "--old-pid", help="PID de l'instance à arrêter."),
+) -> None:
+    """INTERNE (ne pas appeler à la main). Lancé DÉTACHÉ par `update --restart` : arrête
+    l'ancienne instance (old_pid) puis relance un `serve` frais. Détaché = survit au
+    taskkill /T de l'ancienne instance même quand la commande vient d'un terminal mekistudio
+    (qui est un enfant de ce serveur)."""
+    if old_pid > 0:
+        _kill(old_pid)
+    _wait_port_free(port)
+    serve(host="127.0.0.1", port=port, open_browser=False)
+
+
 @app.command()
 def update(
     repo: Path = typer.Option(
@@ -131,12 +175,30 @@ def update(
         )
         return
 
-    if _stop_running(root):
-        typer.secho("[mekistudio] instance en cours arretee.", fg=typer.colors.YELLOW)
-
-    # Relance un process *frais* : l'install editable lui fait réimporter le
-    # code à jour. On enchaîne en avant-plan (ce terminal devient le serveur).
+    # Le redémarrage est délégué à un process DÉTACHÉ (`restart-helper`) : il arrête
+    # l'ancienne instance PUIS relance un serve frais. Pourquoi détaché : `update --restart`
+    # est souvent lancé DEPUIS un terminal mekistudio, lui-même enfant du serveur à arrêter.
+    # Si on arrêtait le serveur ici (taskkill /T = tout l'arbre), on se tuerait nous-mêmes
+    # AVANT d'avoir relancé -> le serveur principal "crash" et rien ne repart. Détaché, le
+    # relanceur survit à l'arrêt de l'arbre et démarre la nouvelle instance.
+    pid_file = paths.meki_dir(root) / "serve.pid"
+    old_pid = 0
+    if pid_file.exists():
+        try:
+            old_pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            old_pid = 0
     exe = shutil.which("mekistudio") or "mekistudio"
-    typer.secho("[mekistudio] redemarrage de serve…", fg=typer.colors.CYAN)
-    proc = subprocess.run([exe, "serve", "--no-open", "--port", str(port)], cwd=str(root))
-    raise typer.Exit(proc.returncode)
+    typer.secho(
+        f"[mekistudio] redemarrage detache sur le port {port}…", fg=typer.colors.CYAN
+    )
+    subprocess.Popen(
+        [exe, "restart-helper", "--port", str(port), "--old-pid", str(old_pid)],
+        cwd=str(root),
+        **_detached_kwargs(),
+    )
+    typer.secho(
+        f"[mekistudio] nouvelle instance sur http://127.0.0.1:{port}/ "
+        "(quelques secondes). Ce terminal va s'arreter avec l'ancienne instance.",
+        fg=typer.colors.GREEN,
+    )

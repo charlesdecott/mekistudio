@@ -56,28 +56,49 @@ def test_update_no_pull_does_nothing_external(tmp_path, monkeypatch):
     assert run_calls == []  # --no-pull : aucune commande externe
 
 
-def test_update_restart_stops_then_relaunches_serve(tmp_path, monkeypatch):
+def test_update_restart_spawns_detached_helper(tmp_path, monkeypatch):
+    # Le redémarrage est délégué à un process DÉTACHÉ : update NE tue PAS lui-même l'ancienne
+    # instance (sinon, lancé depuis un terminal mekistudio enfant du serveur, le taskkill /T se
+    # tuerait lui-même avant de relancer). Il passe le port + l'old_pid au helper détaché.
     (tmp_path / ".git").mkdir()
     meki = tmp_path / ".mekistudio"
     meki.mkdir()
     (meki / "serve.pid").write_text("424242", encoding="utf-8")
 
-    killed, run_calls = [], []
-    monkeypatch.setattr("mekistudio.cli._kill", lambda pid: killed.append(pid))
-    monkeypatch.setattr(
-        "mekistudio.cli.subprocess.run",
-        lambda cmd, *a, **k: run_calls.append(cmd) or _FakeProc(0),
-    )
+    popen_calls = []
+
+    class _FakePopen:
+        def __init__(self, cmd, *a, **k):
+            popen_calls.append((cmd, k))
+
+    monkeypatch.setattr("mekistudio.cli.subprocess.Popen", _FakePopen)
 
     result = CliRunner().invoke(
-        app, ["update", "--repo", str(tmp_path), "--no-pull", "--restart"]
+        app, ["update", "--repo", str(tmp_path), "--no-pull", "--restart", "--port", "8778"]
     )
 
     assert result.exit_code == 0, result.output
-    assert killed == [424242]  # l'instance en cours a été arrêtée
-    assert not (meki / "serve.pid").exists()  # pid nettoyé
-    # un `serve` frais a été relancé
-    assert any("serve" in cmd for cmd in run_calls)
+    assert len(popen_calls) == 1
+    cmd, kwargs = popen_calls[0]
+    assert "restart-helper" in cmd
+    assert "8778" in cmd and "424242" in cmd  # port + old_pid passés au helper
+    # lancé DÉTACHÉ (sinon il mourrait avec le serveur qu'il arrête)
+    assert kwargs.get("creationflags") or kwargs.get("start_new_session")
+
+
+def test_restart_helper_kills_old_then_serves(tmp_path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+    killed, served = [], {}
+    monkeypatch.setattr("mekistudio.cli._kill", lambda pid: killed.append(pid))
+    monkeypatch.setattr("mekistudio.cli._wait_port_free", lambda *a, **k: True)
+    monkeypatch.setattr("mekistudio.cli.serve", lambda **k: served.update(k))
+
+    result = CliRunner().invoke(app, ["restart-helper", "--port", "8778", "--old-pid", "999"])
+
+    assert result.exit_code == 0, result.output
+    assert killed == [999]  # l'ancienne instance est arrêtée par le helper
+    assert served.get("port") == 8778 and served.get("open_browser") is False
 
 
 def test_stop_running_without_pidfile_is_noop(tmp_path, monkeypatch):
