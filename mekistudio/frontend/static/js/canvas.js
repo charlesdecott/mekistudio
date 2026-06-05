@@ -723,11 +723,12 @@ document.addEventListener('alpine:init', () => {
         if (resizing) this._pushOnResize(wrap, node);      // pousse bas/droite (peut borner la taille)
         if (draggingFrame) {
           // déplacer le cadre = translater TOUT son contenu du même delta (clampé aux murs par _pushNeighbors).
-          wrap.style.left = node.x + 'px'; wrap.style.top = node.y + 'px';
           const adx = node.x - orig.x, ady = node.y - orig.y;
           frameKids.forEach((w) => this.setTranslate(w, adx, ady));
         }
-        if (draggingContained) this._sizeSubcanvas(); // node interne bougé -> le cadre grossit/rétrécit live
+        // recale taille+position DÉRIVÉES sur le contenu (live) ; pour le cadre, corrige aussi le
+        // transitoire où un clamp contre un mur réécrirait sa taille périmée via applyBox.
+        if (draggingContained || draggingFrame) this._sizeSubcanvas();
         this.drawCables();                                  // re-route live (positions rendues)
       };
       document.addEventListener('mousemove', onMove);
