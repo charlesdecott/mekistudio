@@ -9,17 +9,19 @@ from fastapi.staticfiles import StaticFiles
 
 from mekistudio.backend.chat.bridge import default_client_factory
 from mekistudio.backend.chat.manager import ChatManager
-from mekistudio.frontend.routes import canvas, chat_ws, fs, git
+from mekistudio.backend.terminal.manager import TerminalManager
+from mekistudio.frontend.routes import canvas, chat_ws, fs, git, terminal_ws
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Le ChatManager est créé dans create_app (toujours disponible) ; le lifespan
-    # ne sert qu'à l'arrêt propre (interrupt + disconnect des sessions Claude).
+    # Les managers sont créés dans create_app (toujours disponibles) ; le lifespan
+    # ne sert qu'à l'arrêt propre (sessions Claude + process PTY des terminaux).
     try:
         yield
     finally:
         await app.state.chat_manager.shutdown()
+        await app.state.terminal_manager.shutdown()
 
 
 def create_app(repo_root: Path | None = None, *, chat_client_factory=None) -> FastAPI:
@@ -35,6 +37,7 @@ def create_app(repo_root: Path | None = None, *, chat_client_factory=None) -> Fa
     app.state.repo_root = repo_root
     app.state.chat_client_factory = chat_client_factory or default_client_factory
     app.state.chat_manager = ChatManager(repo_root, app.state.chat_client_factory)
+    app.state.terminal_manager = TerminalManager(repo_root)
 
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -42,4 +45,5 @@ def create_app(repo_root: Path | None = None, *, chat_client_factory=None) -> Fa
     app.include_router(fs.router)
     app.include_router(git.router)
     app.include_router(chat_ws.router)
+    app.include_router(terminal_ws.router)
     return app
