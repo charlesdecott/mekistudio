@@ -408,3 +408,21 @@ html, body, #canvas { width: 100%; height: 100%; overflow: hidden; }
 .node-wrap[data-kind="fileexplorer"] .cmp-node { background: #182539; }  /* bleu */
 .node-wrap[data-kind="fileeditor"] .cmp-node   { background: #16251f; }  /* vert */
 .node-wrap[data-kind="folder"] .cmp-node       { background: #282116; border-color: #2f5a3f; } /* ambre */
+
+/* --- Brique H : cadre subcanvas (conteneur générique) --- */
+.node-wrap[data-kind="subcanvas"] { z-index: -1; }              /* derrière ses descendants, au-dessus des câbles */
+.node-wrap[data-kind="subcanvas"] .cmp-node {
+  background: rgba(108, 170, 255, 0.04);
+  border: 2px dashed rgba(108, 170, 255, 0.55);
+  border-radius: 12px;
+}
+/* header = bande de titre en haut (la bande réservée par derivedBounds) ; jamais recouvert */
+.node-wrap[data-kind="subcanvas"] .cmp-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 4px 10px; font-size: 12px; color: #9cdcff;
+  background: rgba(17, 51, 78, 0.55); border-radius: 10px 10px 0 0;
+}
+/* replié : tuile compacte (la hauteur dérivée est écrasée par relayoutZones) */
+.node-wrap[data-kind="subcanvas"].collapsed .cmp-node { background: rgba(108,170,255,0.10); border-style: solid; }
+/* descendants masqués quand le cadre est replié */
+.node-wrap.contained-hidden { display: none !important; }

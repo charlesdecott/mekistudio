@@ -1559,7 +1559,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     // --- réduire / agrandir (générique : git + dossier) ---
-    _isCollapsible(node) { return node.kind === 'folder' || node.kind === 'gitbranch' || node.kind === 'fileeditor'; },
+    _isCollapsible(node) { return node.kind === 'folder' || node.kind === 'gitbranch' || node.kind === 'fileeditor' || node.kind === 'subcanvas'; },
     makeCollapseToggle(node) {
       const btn = document.createElement('button');
       btn.type = 'button';
