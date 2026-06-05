@@ -83,6 +83,21 @@ class ChatComponent(ComponentBase):
     spawn_cap: int = Field(default=20, ge=1, le=200)
 
 
+class TerminalComponent(ComponentBase):
+    """Surface terminal (shell PowerShell interactif via PTY). Ne porte que
+    l'identité de la session : le scrollback n'est PAS dans canvas.json — il vit
+    dans .mekistudio/terminals/<id>/ et se charge via la WebSocket /ws/term
+    (comme les messages du chat via /ws/chat). `terminal_id` est stable et persisté
+    ; `cols`/`rows` = dernière taille connue (sert à l'init du PTY au respawn)."""
+
+    type: Literal["terminal"] = "terminal"
+    terminal_id: str = Field(default_factory=new_id)
+    title: str = "terminal"
+    shell: Literal["powershell"] = "powershell"  # extensible plus tard (cmd, bash, wsl…)
+    cols: int = Field(default=80, ge=1, le=1000)
+    rows: int = Field(default=24, ge=1, le=1000)
+
+
 # Union discriminée : le champ `type` sélectionne la classe au parsing. C'est
 # ce qui permet de (dé)sérialiser un arbre hétérogène sans perdre les types.
 Component = Annotated[
@@ -94,6 +109,7 @@ Component = Annotated[
         EditorComponent,
         ChatComponent,
         GitBranchComponent,
+        TerminalComponent,
     ],
     Field(discriminator="type"),
 ]

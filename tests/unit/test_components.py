@@ -10,6 +10,7 @@ from mekistudio.backend.components import (
     HeaderComponent,
     LayoutComponent,
     NodeComponent,
+    TerminalComponent,
 )
 
 
@@ -80,3 +81,36 @@ def test_editor_defaults_and_in_union():
     obj = TypeAdapter(Component).validate_python({"type": "editor", "file_path": "a.py"})
     assert isinstance(obj, EditorComponent)
     assert obj.file_path == "a.py"
+
+
+def test_terminal_defaults_and_in_union():
+    t = TerminalComponent()
+    assert t.type == "terminal"
+    assert t.shell == "powershell"
+    assert t.cols == 80
+    assert t.rows == 24
+    assert t.title == "terminal"
+    assert t.terminal_id  # id auto-généré, non vide
+    # parsable via l'union discriminée
+    obj = TypeAdapter(Component).validate_python(
+        {"type": "terminal", "terminal_id": "abc", "cols": 120, "rows": 40}
+    )
+    assert isinstance(obj, TerminalComponent)
+    assert obj.terminal_id == "abc"
+    assert obj.cols == 120
+
+
+def test_terminal_cols_rows_bounds():
+    TerminalComponent(cols=1, rows=1)        # bornes basses ok
+    TerminalComponent(cols=1000, rows=1000)  # bornes hautes ok
+    with pytest.raises(ValidationError):
+        TerminalComponent(cols=0)
+    with pytest.raises(ValidationError):
+        TerminalComponent(rows=1001)
+
+
+def test_terminal_nested_in_layout_roundtrip():
+    tree = NodeComponent(children=[LayoutComponent(children=[TerminalComponent()])])
+    again = NodeComponent.model_validate(tree.model_dump(mode="json"))
+    assert again == tree
+    assert isinstance(again.children[0].children[0], TerminalComponent)

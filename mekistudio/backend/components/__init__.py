@@ -10,6 +10,7 @@ from mekistudio.backend.components.primitives import (
     HeaderComponent,
     LayoutComponent,
     NodeComponent,
+    TerminalComponent,
     iter_components,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     "EditorComponent",
     "ChatComponent",
     "GitBranchComponent",
+    "TerminalComponent",
     "iter_components",
 ]
