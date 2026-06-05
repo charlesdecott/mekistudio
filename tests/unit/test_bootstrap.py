@@ -30,7 +30,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
     assert isinstance(state, CanvasState)
     assert state.viewport == Viewport()  # défauts, pas de crash
     # Invariant « jamais vide » : on retombe sur le canvas par défaut (built-in).
-    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"}
+    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat", "terminal"}
     # Le fichier corrompu est préservé en .bak (pas de perte silencieuse).
     assert cpath.with_name(cpath.name + ".bak").read_text(encoding="utf-8") == "{ pas du json"
 
@@ -38,7 +38,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
 def test_fresh_canvas_seeds_builtin_nodes(tmp_path):
     bootstrap.ensure_meki_dir(tmp_path)
     state = bootstrap.load_canvas(tmp_path)
-    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"}
+    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat", "terminal"}
 
 
 def test_ensure_adds_missing_builtin_nodes(tmp_path):
@@ -49,7 +49,7 @@ def test_ensure_adds_missing_builtin_nodes(tmp_path):
     bootstrap.save_canvas(tmp_path, state)
     bootstrap.ensure_meki_dir(tmp_path)
     assert {n.kind for n in bootstrap.load_canvas(tmp_path).nodes} == {
-        "kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"
+        "kernel", "gitbranch", "subcanvas", "fileexplorer", "chat", "terminal"
     }
 
 
@@ -114,6 +114,33 @@ def test_ensure_builtin_injects_subcanvas_and_reparents_explorer(tmp_path):
     by = {n.kind: n for n in state.nodes}
     assert "subcanvas" in by                                   # réinjecté
     assert by["fileexplorer"].source_id == by["subcanvas"].id  # rangé dans le cadre
+
+
+def test_ensure_builtin_injects_terminal_parented_to_git(tmp_path):
+    # Canvas pré-brique-I (sans terminal) -> le terminal est réinjecté et pend à git ;
+    # les ids des nodes existants restent stables (migration non destructive).
+    import json
+    from mekistudio.backend.models import CanvasState
+    from mekistudio.backend.nodes import (
+        build_chat_node, build_file_explorer_node, build_gitbranch_node,
+        build_kernel_node, build_subcanvas_node,
+    )
+    k = build_kernel_node()
+    g = build_gitbranch_node(); g.source_id = k.id
+    sc = build_subcanvas_node(); sc.source_id = g.id
+    e = build_file_explorer_node(); e.source_id = sc.id
+    c = build_chat_node(); c.source_id = g.id
+    paths.meki_dir(tmp_path).mkdir(parents=True, exist_ok=True)
+    paths.canvas_path(tmp_path).write_text(
+        json.dumps(CanvasState(nodes=[k, g, sc, e, c]).model_dump(mode="json")), encoding="utf-8"
+    )
+    g_id_before = g.id
+    bootstrap.ensure_meki_dir(tmp_path)
+    state = bootstrap.load_canvas(tmp_path)
+    by = {n.kind: n for n in state.nodes}
+    assert "terminal" in by                          # réinjecté
+    assert by["terminal"].source_id == by["gitbranch"].id  # pend à git
+    assert by["gitbranch"].id == g_id_before         # ids existants stables
 
 
 def test_ensure_builtin_relinks_when_kernel_missing(tmp_path):

@@ -4,7 +4,7 @@ from typing import Callable
 
 from mekistudio.backend.components import EditorComponent, iter_components
 from mekistudio.backend.models import CanvasState, Node
-from mekistudio.backend.nodes import chat, file_editor, file_explorer, folder, gitbranch, kernel, subcanvas
+from mekistudio.backend.nodes import chat, file_editor, file_explorer, folder, gitbranch, kernel, subcanvas, terminal
 from mekistudio.backend.nodes.parenting import longest_prefix_id
 
 # kind -> fabrique de node. Unique endroit qui connaît tous les kinds ; on
@@ -17,6 +17,7 @@ NODE_BUILDERS: dict[str, Callable[..., Node]] = {
     chat.KIND: chat.build_chat_node,
     folder.KIND: folder.build_folder_node,
     subcanvas.KIND: subcanvas.build_subcanvas_node,
+    terminal.KIND: terminal.build_terminal_node,
 }
 
 
@@ -32,6 +33,7 @@ CANONICAL_PARENT_KIND: dict[str, str] = {
     subcanvas.KIND: gitbranch.KIND,        # H : le cadre pend à git
     file_explorer.KIND: subcanvas.KIND,    # H : l'explorateur vit DANS le cadre (était gitbranch)
     chat.KIND: gitbranch.KIND,
+    terminal.KIND: gitbranch.KIND,         # I : le terminal pend aussi à git
     file_editor.KIND: file_explorer.KIND,  # fallback ; le path-aware prend le dessus s'il y a des dossiers
     folder.KIND: file_explorer.KIND,       # fallback ; idem
 }
@@ -152,7 +154,7 @@ def reconcile_constraints(state: CanvasState) -> CanvasState:
 
 
 def default_canvas() -> CanvasState:
-    """Canvas initial (brique H) : kernel → git → { chat, subcanvas → explorateur }.
+    """Canvas initial (brique I) : kernel → git → { chat, terminal, subcanvas → explorateur }.
     Le kernel reste figé à (0,0) ; le cadre subcanvas contient l'explorateur."""
     k = kernel.build_kernel_node()
     g = gitbranch.build_gitbranch_node()
@@ -163,4 +165,6 @@ def default_canvas() -> CanvasState:
     e.source_id = sc.id  # l'explorateur vit dans le cadre
     c = chat.build_chat_node(x=-440.0, y=240.0)
     c.source_id = g.id  # le chat pend aussi à git
-    return CanvasState(nodes=[k, g, sc, e, c])
+    t = terminal.build_terminal_node(x=-440.0, y=560.0)
+    t.source_id = g.id  # le terminal pend aussi à git (brique I)
+    return CanvasState(nodes=[k, g, sc, e, c, t])

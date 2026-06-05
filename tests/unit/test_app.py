@@ -29,9 +29,9 @@ def test_get_canvas_returns_state(tmp_path):
     r = _client(tmp_path).get("/api/canvas")
     assert r.status_code == 200
     body = r.json()
-    # Built-in : kernel + git + subcanvas + explorateur + chat (l'éditeur/dossier sont dynamiques).
+    # Built-in : kernel + git + subcanvas + explorateur + chat + terminal (l'éditeur/dossier sont dynamiques).
     kinds = {n["kind"] for n in body["nodes"]}
-    assert kinds == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"}
+    assert kinds == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat", "terminal"}
     assert all(n["root"]["type"] == "node" for n in body["nodes"])
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 

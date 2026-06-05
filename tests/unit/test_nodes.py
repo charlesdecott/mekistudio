@@ -8,14 +8,17 @@ from mekistudio.backend.components import (
     NodeComponent,
 )
 from mekistudio.backend.models import CanvasState
+from mekistudio.backend.components import TerminalComponent
 from mekistudio.backend.nodes import (
     FILE_EDITOR_KIND,
     FILE_EXPLORER_KIND,
     KERNEL_KIND,
+    TERMINAL_KIND,
     build_file_editor_node,
     build_file_explorer_node,
     build_kernel_node,
     build_node,
+    build_terminal_node,
     default_canvas,
 )
 
@@ -79,11 +82,40 @@ def test_build_node_by_kind():
 
 
 def test_default_canvas_has_builtin_nodes():
-    # Built-in = kernel + git + subcanvas + explorateur + chat.
+    # Built-in = kernel + git + subcanvas + explorateur + chat + terminal (brique I).
     canvas = default_canvas()
     assert isinstance(canvas, CanvasState)
     kinds = {n.kind for n in canvas.nodes}
-    assert kinds == {KERNEL_KIND, "gitbranch", "subcanvas", FILE_EXPLORER_KIND, "chat"}
+    assert kinds == {KERNEL_KIND, "gitbranch", "subcanvas", FILE_EXPLORER_KIND, "chat", "terminal"}
+
+
+def test_build_terminal_node_structure():
+    node = build_terminal_node(x=10, y=20)
+    assert node.kind == TERMINAL_KIND == "terminal"
+    assert (node.x, node.y) == (10, 20)
+    assert node.movable is True and node.resizable is True
+    assert node.configurable is False  # pas de réglages en v1
+    assert node.w and node.h  # boîte par défaut
+    term = node.root.children[0].children[0]
+    assert isinstance(term, TerminalComponent)
+    assert term.shell == "powershell"
+
+
+def test_default_canvas_terminal_parented_to_git():
+    # Brique I : kernel -> git -> { chat, terminal, subcanvas -> explorateur }.
+    state = default_canvas()
+    by = {n.kind: n for n in state.nodes}
+    assert by["terminal"].source_id == by["gitbranch"].id
+
+
+def test_reconcile_source_links_repairs_terminal_to_git():
+    from mekistudio.backend.nodes import reconcile_source_links
+    state = default_canvas()
+    g = next(n for n in state.nodes if n.kind == "gitbranch")
+    t = next(n for n in state.nodes if n.kind == "terminal")
+    t.source_id = "ghost"  # cassé
+    reconcile_source_links(state)
+    assert t.source_id == g.id
 
 
 def test_canvas_with_node_roundtrip():
