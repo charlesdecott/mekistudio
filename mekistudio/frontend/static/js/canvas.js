@@ -212,7 +212,10 @@ document.addEventListener('alpine:init', () => {
       if (!svg || !T) return;
       const groups = this.folderBlobCorners(nodes);
       const seen = new Set();
+      const hidden = new Set();
+      this.$root.querySelectorAll('.node-wrap.contained-hidden').forEach((w) => hidden.add(w.dataset.id));
       groups.forEach((pts, id) => {
+        if (hidden.has(id)) return; // brique H : dossier replié dans le cadre -> pas de territoire
         const d = pts.length ? T.roundedHullPath(pts, 14) : ''; // pad de dessin du blob (cf. ZONE_DRAW_PAD dans relayoutZones)
         if (!d) return;
         seen.add(id);
@@ -251,9 +254,13 @@ document.addEventListener('alpine:init', () => {
       if (!svg) return;
       const C = window.MekiCables;
       // 1) câbles enfant -> parent présent
+      const hidden = new Set();
+      this.$root.querySelectorAll('.node-wrap.contained-hidden').forEach((w) => hidden.add(w.dataset.id));
       const cables = [];
       nodes.forEach((info, id) => {
-        if (info.source && nodes.has(info.source)) cables.push({ id, parent: info.source });
+        if (!info.source || !nodes.has(info.source)) return;
+        if (hidden.has(id) || hidden.has(info.source)) return; // brique H : pas de câble vers un contenu replié
+        cables.push({ id, parent: info.source });
       });
       // 2) côté choisi à chaque extrémité
       const sides = cables.map((cab) => ({
@@ -638,8 +645,8 @@ document.addEventListener('alpine:init', () => {
           // la box finale de A est RELOGÉ définitivement (findFreeSpot) ; les autres reviennent.
           const finalA = { x: node.x, y: node.y, w: wrap.offsetWidth, h: wrap.offsetHeight };
           const contained = this._containedIds();
-      const draggedInside = contained.has(wrap.dataset.id);
-      const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
+          const draggedInside = contained.has(wrap.dataset.id);
+          const wraps = [...this.$root.querySelectorAll('.node-wrap')].filter((w) => w !== wrap && !(contained.has(w.dataset.id) && !draggedInside));
           const obstacles = [finalA];
           for (const w of wraps) {
             const home = this._homeBox(w);
@@ -1634,7 +1641,11 @@ document.addEventListener('alpine:init', () => {
         const st = this._editors[node.id];
         if (st && st.handle && st.handle.refresh) requestAnimationFrame(() => st.handle.refresh());
       }
-      this.drawCables(); // la hauteur change (barre de titre seule) -> les câbles suivent
+      if (node.kind === 'subcanvas') {
+        this.relayoutZones();   // re-dimensionne le cadre (tuile/plein) + (dé)masque les contenus + recâble + refit
+      } else {
+        this.drawCables();      // la hauteur change -> les câbles suivent
+      }
       try {
         await fetch('/api/canvas/nodes/' + node.id, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ collapsed: next }),
