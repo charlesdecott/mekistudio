@@ -26,7 +26,9 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
   `NodeComponent`, `LayoutComponent`, `HeaderComponent` (niv. 1–4), `FileTreeComponent`
   (`root_path`, `excludes`, **`compact_chain`** = compaction des dossiers-en-nodes),
   `EditorComponent` (`file_path`), `ChatComponent` (F3b), **`GitBranchComponent`** (point de
-  montage de l'état git, brique G). `Component` = l'union ; `iter_components(c)` parcourt l'arbre.
+  montage de l'état git, brique G), **`TerminalComponent`** (`terminal_id`/`shell`/`cols`/`rows` —
+  identité d'une session terminal, scrollback hors canvas.json, brique I). `Component` = l'union ;
+  `iter_components(c)` parcourt l'arbre.
 - **`nodes/`** — fabriques + registre. `kernel.py`, `gitbranch.py`, `file_explorer.py`,
   `file_editor.py`, `chat.py`, `folder.py` exposent chacun `KIND` + `build_*_node(...)`.
   `registry.py` : `NODE_BUILDERS`, `build_node`, `default_canvas()` (built-in = **kernel → git →
@@ -47,6 +49,15 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
 - **`fs.py`** — accès fichiers **sandboxé** au repo : `list_dir(root, rel, excludes)`,
   `read_file` (garde binaire/taille `MAX_FILE_BYTES`/UTF-8), `write_file` (fichier
   existant, atomique), `is_file_in_root`.
+- **`chat/`** — backend du node chat (bridge SDK détaché, manager `app.state`, store, hooks/guard).
+- **`terminal/`** (brique I) — backend du node terminal, **calque `chat/`** mais pilote un **PTY**
+  (pywinpty) : `ring.py` (`ScrollbackRing` **pur** — seq monotone + éviction bornée), `store.py`
+  (`TerminalStore` — `scrollback.txt`+`meta.json`, `newline=""` pour préserver les `\r\n` du PTY),
+  `bridge.py` (`TerminalBridge` détaché : spawn PowerShell, **thread lecteur** bloquant qui poste vers
+  la boucle via `call_soon_threadsafe` → **zéro verrou**, broadcast non bloquant + drop, attach/replay,
+  persistance débouncée, respawn d'un shell frais après `exit`), `manager.py` (`TerminalManager` dans
+  `app.state`), `options.py` (`build_spawn` : PowerShell réel, cwd=repo). Sortie relayée en **`str`**
+  (pas de base64).
 
 ## Surface API (`frontend/routes/`)
 
@@ -66,6 +77,8 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
 | `GET /api/git/branch` | état git lecture seule (brique G) |
 | `GET /api/fs?path=&exclude=` | listing dossier (lazy, sandboxé) |
 | `GET /api/file?path=` · `POST /api/file` | lire / sauver un fichier texte |
+| `WS /ws/chat/{conversation_id}` | flux temps réel du node chat (détaché, replay) |
+| `WS /ws/term/{terminal_id}` | flux temps réel du node terminal — `attach{since_seq}`/`input`/`resize` → `output`/`attached`/`exit` (brique I) |
 
 Écritures `canvas.json` sérialisées par un `asyncio.Lock` ; `/api/file` par un autre.
 
@@ -150,6 +163,13 @@ lance le serveur (`serve`) et gère `update`/`update --restart`.
 - **`static/js/editor.js`** — module ESM **CodeMirror 6** (depuis esm.sh) : expose
   `window.MekiEditor.mount()` ; coloration par extension, guides d'indentation,
   word-wrap, thème oneDark, Ctrl+S ; fallback si le CDN ne charge pas.
+- **`static/js/terminal-view.js`** (brique I) — vue du node terminal, expose
+  `window.MekiTerminal.mount(host, terminal_id, comp) → {el, destroy}` : **xterm.js** + **FitAddon**
+  (UMD **vendorés** dans `static/vendor/`, `window.Terminal`/`FitAddon`), WebSocket `/ws/term`
+  (generation guard, backoff, `attach{since_seq}` au (re)connect), clavier → `input`,
+  `ResizeObserver` → `resize`, **démarrage différé en rAF** (le host doit être dimensionné pour
+  `fit()`). `canvas.js` ajoute la branche `terminal` dans `renderComponent` (`mountTerminal`,
+  indexé `_termViews`, détruit au re-render/`rerenderNode` comme `_chatViews`).
 - **`static/css/canvas.css`** — scrollbar discrète globale ; layer `.cables` néon
   (`.cable-halo`/`.cable-core`, `z-index:-1`) ; transition `.node-wrap` (transform + box-shadow) ;
   mini-toolbar + glows d'impulsion.
@@ -178,6 +198,11 @@ Dépendances réseau externes (assumées) : Alpine (unpkg), CodeMirror (esm.sh).
   (MTV, VIDE garanti entre blobs dessinés) + collision douce au move/resize/spawn + réconciliation au boot ; le
   `kernel` (`movable:false`) fait office de **mur**. Les nodes **se ré-arrangent en douceur** (animé,
   transition CSS) — jamais de saut/clignotement.
+- **Terminal détaché = PTY hors canvas.json** (brique I) : le `terminal_id` est persisté, **pas** le
+  scrollback (vit dans `.mekistudio/terminals/<id>/`, comme les messages du chat). Le process PTY vit
+  dans `app.state` (survit au reload de page) mais **meurt avec le serveur** ; au reattach, seul le
+  **scrollback texte** est rejoué puis un **shell frais** est relancé. Toute mutation d'état du bridge
+  se fait **sur la boucle asyncio** (le thread lecteur ne fait que poster via `call_soon_threadsafe`).
 
 ## Recette : ajouter un node
 

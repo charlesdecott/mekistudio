@@ -130,6 +130,24 @@ petit**, en s'inspirant des concepts des anciennes versions documentés dans
     (node/topologie/migration) + `node --test` (`subcanvas.js`) + Playwright (`pw-subcanvas.mjs`).
     Futur : un subcanvas par worktree git (imbriqué). Spec/plan :
     `docs/superpowers/{specs,plans}/2026-06-05-subcanvas-node*`.
+  - **Brique I — node terminal** (livré, 2026-06-05) : nouvelle topologie
+    **`kernel → git → { chat, terminal, subcanvas → explorateur }`**. **Shell PowerShell interactif**
+    (vrai PTY via **pywinpty**) piloté depuis le canvas — taper des commandes, lancer un build/serveur,
+    voir les logs en direct, REPL, couleurs ANSI, resize. Backend `backend/terminal/` **calque
+    `backend/chat/`** : `TerminalManager` dans `app.state`, **`TerminalBridge`** détaché façon `screen`
+    (1 par `terminal_id`, survit au reload), `TerminalStore` (scrollback + meta persistés), **WebSocket
+    `/ws/term`** (`attach{since_seq}`/replay, drop+1013 si socket lent) — mais le bridge pilote un **PTY**
+    au lieu du SDK. Un **thread lecteur** (read PTY bloquant) poste vers la boucle asyncio
+    (`call_soon_threadsafe`, **zéro verrou**) ; sortie relayée en **`str`** (pywinpty décode l'UTF-8
+    incrémentalement → **pas de base64**) ; **`ScrollbackRing`** pur (seq monotone + éviction bornée) ;
+    persistance **débouncée** (`newline=""` → `\r\n` PTY préservés). Front **xterm.js vendoré**
+    (`terminal-view.js` → `window.MekiTerminal`, démarrage différé en rAF pour `fit()`, reattach). Shell
+    **réel non sandboxé**, cwd = repo (choix assumé ; le confinement conteneur reste la brique Docker mise
+    de côté). **Migration auto** (`_ensure_builtin_nodes` injecte le terminal + le relie à git). Validé
+    pytest (component/node/migration/ring/store + smoke PTY réel + WS réel) + Playwright
+    (`pw-terminal.mjs` : `echo` → sortie, scrollback rejoué au reload, 0 erreur console). Futur : spawn
+    multi à la demande, clear/restart, multi-shell, terminal worktree-aware. Spec/plan :
+    `docs/superpowers/{specs,plans}/2026-06-05-terminal-node*`.
   - Reste sur le chat : **write/Edit/Bash + isolation Docker** (brique dédiée, cf.
     `docs/sandbox-isolation-research.md` : conteneur par session + clone + merge-back) · **QCM /
     `ask_user`** (le glow-notif persistant l'attend déjà) · modes de carte A/B en réglages.
@@ -165,7 +183,8 @@ des **nodes composés de briques modulaires** plutôt qu'un canvas monolithique.
    `docs/old/mekistudio/05-canvas.md`, `docs/old/mekistudio-lego/02-node-catalog.md`.
 5. **Worktrees git** par branche, état isolé. Réf :
    `docs/old/mekistudio/06-worktrees.md`.
-6. **Terminaux** (PTY via pywinpty). Réf : catalogue de nodes lego.
+6. ✅ **Terminaux** (PTY via pywinpty) — **livré (brique I)** : node terminal PowerShell
+   interactif (xterm.js + bridge PTY détaché). Réf : catalogue de nodes lego.
 7. **Plus tard / optionnel** : sandbox Docker + Traefik (mis de côté). Réf :
    `docs/old/mekistudio/07-sandbox-docker.md`.
 
