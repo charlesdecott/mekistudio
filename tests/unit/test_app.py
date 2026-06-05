@@ -29,9 +29,9 @@ def test_get_canvas_returns_state(tmp_path):
     r = _client(tmp_path).get("/api/canvas")
     assert r.status_code == 200
     body = r.json()
-    # Built-in : kernel + git + explorateur + chat (l'éditeur/dossier sont dynamiques).
+    # Built-in : kernel + git + subcanvas + explorateur + chat (l'éditeur/dossier sont dynamiques).
     kinds = {n["kind"] for n in body["nodes"]}
-    assert kinds == {"kernel", "gitbranch", "fileexplorer", "chat"}
+    assert kinds == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"}
     assert all(n["root"]["type"] == "node" for n in body["nodes"])
     assert body["viewport"] == {"x": 0, "y": 0, "zoom": 1}
 
@@ -415,11 +415,12 @@ def test_git_branch_endpoint(tmp_path):
     assert set(body) == {"branch", "detached", "dirty", "ahead", "behind"}
 
 
-def test_default_canvas_git_topology_via_api(tmp_path):
+def test_default_canvas_subcanvas_topology_via_api(tmp_path):
     nodes = _client(tmp_path).get("/api/canvas").json()["nodes"]
     by = {n["kind"]: n for n in nodes}
     assert by["gitbranch"]["source_id"] == by["kernel"]["id"]
-    assert by["fileexplorer"]["source_id"] == by["gitbranch"]["id"]
+    assert by["subcanvas"]["source_id"] == by["gitbranch"]["id"]
+    assert by["fileexplorer"]["source_id"] == by["subcanvas"]["id"]
     assert by["chat"]["source_id"] == by["gitbranch"]["id"]
 
 

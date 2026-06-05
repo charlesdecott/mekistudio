@@ -30,7 +30,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
     assert isinstance(state, CanvasState)
     assert state.viewport == Viewport()  # défauts, pas de crash
     # Invariant « jamais vide » : on retombe sur le canvas par défaut (built-in).
-    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "fileexplorer", "chat"}
+    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"}
     # Le fichier corrompu est préservé en .bak (pas de perte silencieuse).
     assert cpath.with_name(cpath.name + ".bak").read_text(encoding="utf-8") == "{ pas du json"
 
@@ -38,7 +38,7 @@ def test_load_canvas_survives_corrupt_json(tmp_path):
 def test_fresh_canvas_seeds_builtin_nodes(tmp_path):
     bootstrap.ensure_meki_dir(tmp_path)
     state = bootstrap.load_canvas(tmp_path)
-    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "fileexplorer", "chat"}
+    assert {n.kind for n in state.nodes} == {"kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"}
 
 
 def test_ensure_adds_missing_builtin_nodes(tmp_path):
@@ -49,7 +49,7 @@ def test_ensure_adds_missing_builtin_nodes(tmp_path):
     bootstrap.save_canvas(tmp_path, state)
     bootstrap.ensure_meki_dir(tmp_path)
     assert {n.kind for n in bootstrap.load_canvas(tmp_path).nodes} == {
-        "kernel", "gitbranch", "fileexplorer", "chat"
+        "kernel", "gitbranch", "subcanvas", "fileexplorer", "chat"
     }
 
 
@@ -107,9 +107,9 @@ def test_ensure_builtin_relinks_when_kernel_missing(tmp_path):
     legacy = {"schema_version": 1, "nodes": [e.model_dump(mode="json")], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
     paths.canvas_path(tmp_path).write_text(json.dumps(legacy), encoding="utf-8")
 
-    ensure_meki_dir(tmp_path)  # doit réinjecter les built-in (kernel+git) ET relier l'explorateur
+    ensure_meki_dir(tmp_path)  # doit réinjecter les built-in (kernel+git+subcanvas) ET relier l'explorateur
     state = load_canvas(tmp_path)
-    g = next(n for n in state.nodes if n.kind == "gitbranch")
+    sc = next(n for n in state.nodes if n.kind == "subcanvas")
     exp = next(n for n in state.nodes if n.kind == "fileexplorer")
-    # Brique G : l'explorateur pend désormais à git (parent canonique), pas au kernel.
-    assert exp.source_id == g.id  # relié au VRAI git présent, pas l'id mort
+    # Brique H : l'explorateur pend désormais au subcanvas (parent canonique), pas au kernel.
+    assert exp.source_id == sc.id  # relié au VRAI subcanvas présent, pas l'id mort
