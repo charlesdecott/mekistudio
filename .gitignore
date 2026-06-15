@@ -18,3 +18,7 @@ scripts/.pw/
 # Claude: on versionne settings.json (plugins activés), pas les artefacts runtime
 .claude/*
 !.claude/settings.json
+
+# Trailer produit : frames + MP4 lourds/régénérables (on garde poster.png + preview.gif)
+trailer/frames/
+trailer/out/*.mp4

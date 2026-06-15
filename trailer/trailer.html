@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>mekistudio — trailer</title>
+
+<!-- ═══ VRAIE identité du produit : la CSS réelle du canvas + les vendors réels ═══ -->
+<link rel="stylesheet" href="../mekistudio/frontend/static/css/canvas.css">
+<script src="../mekistudio/frontend/static/js/cables.js"></script>
+<script src="../mekistudio/frontend/static/vendor/marked.min.js"></script>
+<script src="../mekistudio/frontend/static/vendor/purify.min.js"></script>
+
+<style>
+  /* ════════ TOKENS DE MARQUE — dérivés de canvas.css (palette réelle) ════════ */
+  :root{
+    --brand-1:#4d8dff;          /* bleu — sélection / explorateur / utilisateur */
+    --brand-2:#b388ff;          /* violet — git / assistant / chemin de comète */
+    --warn:#ffce6e;             /* ambre — courant / comète */
+    --green:#49c486;            /* vert — fichiers / en ligne */
+    --bg:#0f1115; --bg-2:#1a2030;
+    --text:#e6e6e6; --muted:#9aa4b2; --faint:#6b7280;
+    --ui:system-ui,"Segoe UI",sans-serif;
+    --mono:Consolas,"JetBrains Mono",ui-monospace,monospace;
+    --glow-2:0 0 10px rgba(179,136,255,.55),0 0 26px rgba(179,136,255,.25);
+    --glow-1:0 0 10px rgba(77,141,255,.5),0 0 26px rgba(77,141,255,.22);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);
+    font-family:var(--ui);color:var(--text);cursor:none}
+
+  /* ════════ FOND : la grille réelle du canvas (#0f1115 + lignes #1b1f27) + vignette douce ════════ */
+  .bg{position:fixed;inset:0;z-index:0;background-color:#0f1115;
+    background-image:linear-gradient(#1b1f27 1px,transparent 1px),linear-gradient(90deg,#1b1f27 1px,transparent 1px);
+    background-size:44px 44px}
+  .vig{position:fixed;inset:0;z-index:1;pointer-events:none;background:
+    radial-gradient(130% 100% at 50% 50%,transparent 42%,rgba(0,0,0,.62)),
+    radial-gradient(90% 70% at 78% 8%,rgba(179,136,255,.07),transparent 60%),
+    radial-gradient(90% 70% at 12% 96%,rgba(77,141,255,.07),transparent 60%)}
+
+  /* ════════ STAGE = canvas persistant (caméra) ════════ */
+  #stage{position:fixed;inset:0;z-index:2;opacity:0}
+  #world{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+  /* la comète/flux vivent dans le layer .cables réel */
+  svg.cables{overflow:visible}
+  .flow{fill:none;stroke-linecap:round}
+  .comet{fill:#fff7da;filter:drop-shadow(0 0 7px rgba(255,206,110,.95))}
+  .comet-trail{fill:#ffce6e;filter:drop-shadow(0 0 4px rgba(255,180,80,.7))}
+  /* fake terminal (xterm non monté ici) — fidèle au host réel #0b0e14 */
+  .fxterm{font-family:var(--mono);font-size:14px;line-height:1.55;color:#cfe3ff;white-space:pre-wrap;width:100%}
+  .fxterm .ps{color:#7aa2ff} .fxterm .ok{color:var(--green)} .fxterm .dim{color:#6b7890}
+  .fxterm .cur{color:#cfe3ff}
+  /* la barre de titre du subcanvas réelle est en absolute ; on lui donne un libellé clair */
+
+  /* ════════ CAPTIONS (lower-third, dans le langage du produit) ════════ */
+  .cap{position:fixed;left:0;right:0;z-index:8;text-align:center;opacity:0;
+    font-family:var(--ui);font-weight:650;color:#fff;letter-spacing:.005em}
+  .cap .m{color:var(--brand-2);text-shadow:var(--glow-2)}
+  .cap .b{color:var(--brand-1);text-shadow:var(--glow-1)}
+  .cap .g{color:var(--green)}
+  .cap .a{color:var(--warn)}
+  .cap .pill{display:inline-block;padding:10px 22px;border-radius:14px;
+    background:rgba(20,24,32,.72);border:1px solid #2c3650;backdrop-filter:blur(6px);
+    box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  .cap .k{font-family:var(--mono);font-size:.62em;color:var(--muted);letter-spacing:.18em;text-transform:uppercase}
+
+  /* ════════ SCÈNES OVERLAY (boot / features / outro) ════════ */
+  .scene{position:fixed;inset:0;z-index:10;opacity:0;display:grid;place-items:center}
+  #t{position:fixed;left:10px;bottom:8px;z-index:99;font:12px var(--mono);color:var(--brand-2);opacity:0}
+
+  /* logo */
+  .logo-row{display:flex;align-items:center;gap:30px}
+  .glyph{width:128px;height:128px;border-radius:26px;position:relative;
+    background:linear-gradient(150deg,#1b2236,#0f1115);border:1px solid #2c3650;
+    box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 40px rgba(179,136,255,.12);display:grid;place-items:center}
+  .glyph svg{width:78px;height:78px}
+  .wordmark{font-weight:760;font-size:138px;letter-spacing:-.018em;color:#fff}
+  .wordmark .dot{color:var(--brand-2);text-shadow:var(--glow-2)}
+  .sub{font-family:var(--mono);letter-spacing:.26em;color:var(--muted);text-transform:uppercase;font-size:22px}
+  .sub b{color:var(--brand-1)} .sub i{color:var(--brand-2);font-style:normal} .sub u{color:var(--green);text-decoration:none}
+
+  /* features cards (langage des cmp-node) */
+  .cards{display:flex;gap:30px;justify-content:center}
+  .card{width:392px;border-radius:14px;background:var(--bg-2);border:1px solid #2c3650;
+    border-top:3px solid var(--cc,var(--brand-1));padding:34px 30px;opacity:0;
+    box-shadow:0 18px 50px rgba(0,0,0,.5),0 0 34px -14px var(--cc,var(--brand-1))}
+  .card .ico{width:56px;height:56px;border-radius:13px;display:grid;place-items:center;margin-bottom:18px;
+    background:color-mix(in srgb,var(--cc,var(--brand-1)) 16%,#11151d);border:1px solid color-mix(in srgb,var(--cc,var(--brand-1)) 45%,transparent)}
+  .card .ico svg{width:30px;height:30px;stroke:var(--cc,var(--brand-1))}
+  .card .nm{font-size:27px;font-weight:720;color:#fff;margin-bottom:10px}
+  .card .ro{color:var(--muted);font-size:18.5px;line-height:1.5}
+  .card .ro b{color:var(--text);font-weight:600}
+
+  /* outro */
+  .term{width:820px;border-radius:12px;background:#0b0e14;border:1px solid #1c2533;border-left:3px solid var(--brand-2);
+    padding:26px 32px;font-family:var(--mono);font-size:25px;line-height:1.75;opacity:0;box-shadow:0 20px 60px rgba(0,0,0,.55)}
+  .term .pr{color:var(--brand-2)} .term .ok{color:var(--green)} .term .dim{color:#6b7890}
+  .ctaline{font-family:var(--mono);font-size:21px;letter-spacing:.04em;color:var(--muted);opacity:0;text-align:center}
+  .ctaline .m{color:var(--brand-2);text-shadow:var(--glow-2)}
+  .vision{font-size:25px;color:#cdd6e6;opacity:0;text-align:center;max-width:1100px;line-height:1.5;font-weight:550}
+  .vision .m{color:var(--brand-2);text-shadow:var(--glow-2)} .vision .g{color:var(--green)}
+</style>
+</head>
+<body>
+  <div class="bg"></div>
+  <div class="vig"></div>
+
+  <!-- ════════ CANVAS PERSISTANT ════════ -->
+  <div id="stage"><div id="world"></div></div>
+
+  <!-- captions sur le canvas -->
+  <div class="cap" id="cap-concept" style="bottom:9%"><span class="pill" style="font-size:38px">Un canvas vivant où <span class="m">tout est un node</span> — et tout est relié.</span></div>
+  <div class="cap" id="cap-concept2" style="bottom:9%"><span class="pill" style="font-size:30px"><span class="k">noyau · git · chat · terminal · explorateur</span></span></div>
+  <div class="cap" id="cap-chat" style="bottom:9%"><span class="pill" style="font-size:36px">Une <span class="m">vraie session Claude</span>, vivante, dans le canvas.</span></div>
+  <div class="cap" id="cap-spawn" style="bottom:9%"><span class="pill" style="font-size:37px">Claude lit un fichier — <span class="g">il apparaît</span> sur le canvas.</span></div>
+  <div class="cap" id="cap-current" style="bottom:9%"><span class="pill" style="font-size:37px">Le <span class="a">courant</span> circule dans les câbles.</span></div>
+
+  <!-- ════════ S0 BOOT / LOGO ════════ -->
+  <section class="scene" id="sc-boot">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:34px">
+      <div class="logo-row" id="boot-logo">
+        <div class="glyph">
+          <svg viewBox="0 0 64 64" fill="none">
+            <circle cx="14" cy="20" r="6" fill="#b388ff"/><circle cx="14" cy="44" r="6" fill="#4d8dff"/>
+            <circle cx="46" cy="32" r="7" fill="#49c486"/>
+            <path d="M20 20 H34 a6 6 0 0 1 6 6 v0" stroke="#b388ff" stroke-width="2.4" fill="none"/>
+            <path d="M20 44 H34 a6 6 0 0 0 6 -6 v0" stroke="#4d8dff" stroke-width="2.4" fill="none"/>
+          </svg>
+        </div>
+        <div class="wordmark">mekistudio<span class="dot">.</span></div>
+      </div>
+      <div class="sub" id="boot-sub">studio de dev <b>IA</b> &nbsp;·&nbsp; <i>pur Python</i> &nbsp;·&nbsp; sans Docker &nbsp;·&nbsp; <u>auto-hébergé</u></div>
+    </div>
+  </section>
+
+  <!-- ════════ S4 FEATURES ════════ -->
+  <section class="scene" id="sc-features">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:46px">
+      <div class="cards">
+        <div class="card" id="cd0" style="--cc:var(--brand-1)">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg></div>
+          <div class="nm">Pur Python, zéro Docker</div>
+          <div class="ro">Un seul repo <b>auto-hébergé</b>. <code>uv · FastAPI · Alpine</code>. Rien à orchestrer.</div>
+        </div>
+        <div class="card" id="cd1" style="--cc:var(--brand-2)">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7l3 3M14 14l3 3"/></svg></div>
+          <div class="nm">Claude, nativement</div>
+          <div class="ro">Chat <b>streamé</b>, outils, hooks → <b>impulsions</b> : lire un fichier le fait naître.</div>
+        </div>
+        <div class="card" id="cd2" style="--cc:var(--green)">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.2-8.5"/><path d="M21 4v5h-5"/></svg></div>
+          <div class="nm">Il se met à jour seul</div>
+          <div class="ro"><code>mekistudio update</code> : git pull, code <b>live</b>. Le studio évolue dans son propre repo.</div>
+        </div>
+      </div>
+      <div class="cap" id="feat-cap" style="position:static;opacity:0;font-size:30px;color:var(--muted)">Chat · git · terminal · éditeurs · dossiers — <span class="m">chacun un node, tous reliés.</span></div>
+    </div>
+  </section>
+
+  <!-- ════════ S5 OUTRO / CTA ════════ -->
+  <section class="scene" id="sc-outro">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:38px">
+      <div class="logo-row" id="out-logo" style="gap:22px">
+        <div class="glyph" style="width:92px;height:92px;border-radius:20px"><svg viewBox="0 0 64 64" fill="none"><circle cx="14" cy="20" r="6" fill="#b388ff"/><circle cx="14" cy="44" r="6" fill="#4d8dff"/><circle cx="46" cy="32" r="7" fill="#49c486"/><path d="M20 20 H34 a6 6 0 0 1 6 6" stroke="#b388ff" stroke-width="2.4" fill="none"/><path d="M20 44 H34 a6 6 0 0 0 6 -6" stroke="#4d8dff" stroke-width="2.4" fill="none"/></svg></div>
+        <div class="wordmark" style="font-size:96px">mekistudio<span class="dot">.</span></div>
+      </div>
+      <div class="vision" id="out-vision">La vision : <span class="m">importer mekistudio dans lui-même</span> — et le laisser <span class="g">s'améliorer tout seul.</span></div>
+      <div class="term" id="out-term"><div><span class="pr">PS</span> <span class="dim">C:\mekistudio&gt;</span> <span id="out-cmd"></span><span id="out-cur" class="cur">▌</span></div></div>
+      <div class="ctaline" id="out-cta">canvas → <span class="m">http://127.0.0.1:8777</span></div>
+    </div>
+  </section>
+
+  <div id="t"></div>
+
+<script>
+/* ════════════════════════════ HARNESS ════════════════════════════ */
+const FPS=30, DUR=89000;
+const SC={ boot:[0,7200], features:[67000,79200], outro:[79000,89000] };
+/* fenêtre du canvas persistant */
+const STAGE_IN=6600, STAGE_OUT=67200;
+
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,u)=>a+(b-a)*u;
+const easeOut=u=>1-Math.pow(1-u,3);
+const easeInOut=u=>u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2;
+const prog=(t,a,b)=>clamp((t-a)/(b-a),0,1);
+function win(t,in0,in1,out0,out1){ if(t<in0||t>out1)return 0; if(t<in1)return easeOut(prog(t,in0,in1));
+  if(t<out0)return 1; return 1-easeInOut(prog(t,out0,out1)); }
+const typed=(full,t,a,b)=>full.slice(0,Math.round(full.length*easeOut(prog(t,a,b))));
+const $=id=>document.getElementById(id);
+const setS=(id,p,v)=>{const e=$(id); if(e)e.style[p]=v;};
+const op=(id,v)=>setS(id,'opacity',v);
+const setText=(id,s)=>{const e=$(id); if(e)e.textContent=s;};
+function sceneFade(id,a,b,t,fin=520,fout=520){
+  const o=win(t,a-fin,a,b-fout,b); const e=$(id);
+  if(e){ e.style.opacity=o; e.style.visibility=o>0?'visible':'hidden'; } return o;
+}
+function cap(id,t,a,b,dy=16){ const o=win(t,a,a+360,b-340,b); op(id,o);
+  setS(id,'transform','translateY('+lerp(dy,0,easeOut(prog(t,a,a+460))).toFixed(1)+'px)'); }
+function renderMd(text){ try{ return DOMPurify.sanitize(marked.parse(text||'')); }catch(e){ return (text||''); } }
+
+/* ════════════════════════════ MODÈLE DU CANVAS ════════════════════════════
+   Coords MONDE. Topologie réelle : kernel → git → { chat, terminal, explorateur }.
+   Le subcanvas est un cadre DÉCORATIF qui confine l'explorateur + dossiers + éditeurs.
+   Les éditeurs (lecture) naissent RÉDUITS (barre de titre = nom du fichier) + éphémères. */
+const NODES=[
+  {id:'kernel',  kind:'kernel',      x:300, y:30,  w:230, h:104, src:null,        rv:7300},
+  {id:'git',     kind:'gitbranch',   x:660, y:70,  w:258, h:92,  src:'kernel',    rv:7850},
+  {id:'chat',    kind:'chat',        x:120, y:250, w:496, h:560, src:'git',       rv:8500},
+  {id:'terminal',kind:'terminal',    x:150, y:858, w:452, h:236, src:'git',       rv:9050},
+  {id:'subcanvas',kind:'subcanvas',  x:702, y:262, w:846, h:470, src:null,        rv:44200, deco:true,
+     title:'explorateur · subcanvas (worktree)'},
+  {id:'explorer',kind:'fileexplorer',x:742, y:332, w:286, h:368, src:'git',       rv:9850},
+  /* spawns (matérialisation) */
+  {id:'folder',  kind:'folder',      x:1086,y:476, w:120, h:112, src:'explorer',  rv:46000, collapsed:true, folder:true, title:'terminal'},
+  {id:'bridge',  kind:'fileeditor',  x:1262,y:344, w:256, h:46,  src:'folder',    rv:48700, file:'bridge.py', ephemeral:true},
+  {id:'store',   kind:'fileeditor',  x:1276,y:470, w:256, h:46,  src:'folder',    rv:51700, file:'store.py',  ephemeral:true},
+  {id:'ring',    kind:'fileeditor',  x:1262,y:596, w:256, h:46,  src:'folder',    rv:54700, file:'ring.py',   ephemeral:true},
+];
+const byId={}; NODES.forEach(n=>byId[n.id]=n);
+const boxOf=n=>({x:n.x,y:n.y,w:n.w,h:n.h});
+const cablesById={};  /* edgeId -> {pts, len, pathEl, gEl, childId} */
+
+/* ---- construit le DOM d'un node (markup réel du canvas) ---- */
+function fsRow(icon,name,depth,cls){
+  return '<div class="fs-row '+(cls||'')+'" style="padding-left:'+(2+depth*16)+'px">'
+    +'<span class="fs-caret">'+(icon==='📂'||icon==='📁'?'▸':'')+'</span>'
+    +'<span class="fs-icon">'+icon+'</span><span class="fs-name">'+name+'</span></div>';
+}
+function innerFor(n){
+  if(n.kind==='kernel')
+    return '<h1 class="cmp-header level-1">mekistudio</h1><h4 class="cmp-header level-4">noyau · studio de dev IA</h4>';
+  if(n.kind==='gitbranch')
+    return '<div class="cmp-gitbranch"><div class="gb-title">⎇ feat-terminals</div><div class="gb-detail">↑2 ↓0 · ● 3 modifs</div></div>';
+  if(n.kind==='terminal')
+    return '<div class="cmp-terminal-host"><div class="fxterm" id="fx"></div></div>';
+  if(n.kind==='subcanvas')
+    return '<h4 class="cmp-header">'+n.title+'</h4>';
+  if(n.kind==='fileexplorer')
+    return '<h3 class="cmp-header level-3">explorateur</h3><div class="cmp-filetree" id="ftree">'
+      +fsRow('📂','mekistudio',0)
+      +fsRow('📂','backend',1)
+      +'<div id="ftrow-terminal">'+fsRow('📂','terminal',2)+'</div>'
+      +fsRow('📄','bridge.py',3,'f-bridge')
+      +fsRow('📄','store.py',3,'f-store')
+      +fsRow('📄','ring.py',3,'f-ring')
+      +fsRow('📄','manager.py',3)
+      +fsRow('📂','chat',2)
+      +fsRow('📂','frontend',1)
+      +fsRow('📄','cli.py',1)
+      +'</div>';
+  if(n.kind==='folder')
+    return '<h3 class="cmp-header level-3">'+n.title+'</h3>';
+  if(n.kind==='fileeditor')
+    return '<div class="cmp-editor"><div class="editor-bar">'
+      +'<span class="editor-name">'+n.file+'</span>'
+      +'<button class="editor-save" disabled>Enregistrer</button>'
+      +'<button class="editor-close">✕</button></div>'
+      +'<div class="editor-cm"></div></div>';
+  return '';
+}
+function buildNode(n){
+  const wrap=document.createElement('div');
+  wrap.className='node-wrap'+(n.collapsed?' collapsed':'')+(n.ephemeral?' ephemeral':'');
+  wrap.dataset.id=n.id; wrap.dataset.kind=n.kind;
+  wrap.dataset.source=n.deco?'':(n.src||'');
+  wrap.style.left=n.x+'px'; wrap.style.top=n.y+'px';
+  if(!n.collapsed){ wrap.style.width=n.w+'px'; wrap.style.height=n.h+'px'; wrap.classList.add('sized'); }
+  const node=document.createElement('div'); node.className='cmp-node'; node.innerHTML=innerFor(n);
+  wrap.appendChild(node);
+  return wrap;
+}
+
+/* ---- construit la conversation chat (markup réel chat-view.js) ---- */
+const CHAT_USER="Comment marche le node terminal ? Lis le bridge et explique-moi.";
+const CHAT_ASSIST=
+"Le **node terminal** pilote un vrai **PowerShell** via un PTY (`pywinpty`).\n\n"+
+"Le `TerminalBridge` tourne **détaché**, façon `screen` : il survit au reload du canvas. "+
+"Un thread lecteur lit le PTY et poste vers la boucle asyncio — **zéro verrou**.\n\n"+
+"Le scrollback est borné par un `ScrollbackRing` pur, puis **persisté** sur disque et **rejoué au reattach**.";
+const TOOLS=[
+  {ico:'📄',name:'Read',c:'#4d8dff',arg:'backend/terminal/bridge.py'},
+  {ico:'📄',name:'Read',c:'#4d8dff',arg:'backend/terminal/store.py'},
+  {ico:'🔎',name:'Grep',c:'#b388ff',arg:'ScrollbackRing'},
+  {ico:'📄',name:'Read',c:'#4d8dff',arg:'backend/terminal/ring.py'},
+];
+function buildChatInner(host){
+  const wrap=document.createElement('div'); wrap.className='cmp-chat';
+  wrap.innerHTML=
+    '<div class="chat-header"><span class="chat-dot"></span><span class="chat-title">chat</span>'
+    +'<span class="chat-spacer"></span><button class="chat-new">✨ Nouvelle session</button></div>'
+    +'<div class="chat-statusbar" id="chat-status" style="display:none"><span class="chat-status-text">✦ Claude écrit…</span><button class="chat-stop">⏹ Stop</button></div>'
+    +'<div class="chat-messages" id="chat-list"></div>'
+    +'<div class="chat-composer"><textarea class="chat-input" placeholder="Écris à Claude…"></textarea><button class="chat-send">➤</button></div>';
+  host.appendChild(wrap);
+}
+function chatRow(kind,name,avatar,bodyHtml){
+  return '<div class="chat-row chat-'+kind+'"><div class="chat-avatar chat-av-'+kind+'">'+avatar+'</div>'
+    +'<div class="chat-body"><div class="chat-name">'+name+'</div>'+bodyHtml+'</div></div>';
+}
+
+/* ════════════════════════════ CÂBLES (MekiCables réel) ════════════════════════════ */
+function obstaclesFor(childId,parentId){
+  const PAD=window.MekiCables.STUB, obs=[];
+  NODES.forEach(n=>{ if(n.id===childId||n.id===parentId||n.deco) return;
+    obs.push({x:n.x-PAD,y:n.y-PAD,w:n.w+2*PAD,h:n.h+2*PAD}); });
+  return obs;
+}
+function buildCables(){
+  const world=$('world');
+  let svg=world.querySelector('svg.cables');
+  if(!svg){ svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); svg.setAttribute('class','cables'); world.insertBefore(svg,world.firstChild); }
+  const C=window.MekiCables;
+  NODES.forEach(n=>{
+    if(!n.src||n.deco) return;
+    const a=boxOf(n), b=boxOf(byId[n.src]);
+    const sA=C.adaptiveSide(a,b), sB=C.adaptiveSide(b,a);
+    const pts=C.routeAround(C.sideAnchor(a,sA,0),sA,C.sideAnchor(b,sB,0),sB,obstaclesFor(n.id,n.src));
+    const d=C.pointsToPath(pts);
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.dataset.edge=n.id; g.setAttribute('class','cable '+C.cableClass(n.kind,byId[n.src].kind));
+    const halo=document.createElementNS('http://www.w3.org/2000/svg','path'); halo.setAttribute('class','cable-halo'); halo.setAttribute('d',d);
+    const core=document.createElementNS('http://www.w3.org/2000/svg','path'); core.setAttribute('class','cable-core'); core.setAttribute('d',d);
+    /* overlay de COURANT : pointillés ambrés qui défilent (fonction de t) */
+    const flow=document.createElementNS('http://www.w3.org/2000/svg','path'); flow.setAttribute('class','flow'); flow.setAttribute('d',d);
+    flow.setAttribute('stroke','rgba(255,206,110,.9)'); flow.setAttribute('stroke-width','2.2'); flow.setAttribute('stroke-dasharray','2 26');
+    g.append(halo,core,flow);
+    svg.appendChild(g);
+    // longueur via path détaché
+    const len=core.getTotalLength();
+    cablesById[n.id]={pts,len,core,gEl:g,flow,childId:n.id};
+  });
+  return svg;
+}
+
+/* concatène la route from->to en UNE polyligne orientée (sens du flux) pour la comète */
+function cometRoute(fromId,toId){
+  const C=window.MekiCables;
+  const segs=C.pathBetween(byId,fromId,toId);
+  if(!segs||!segs.length) return null;
+  let out=[];
+  segs.forEach((s,i)=>{
+    const cab=cablesById[s.childId]; if(!cab) return;
+    let p=cab.pts.slice();
+    // pts vont enfant->parent ; 'up' = enfant->parent (tel quel), 'down' = parent->enfant (inversé)
+    if(s.dir==='down') p=p.slice().reverse();
+    if(i>0) p=p.slice(1);
+    out=out.concat(p);
+  });
+  return out;
+}
+function buildCometPaths(){
+  // une comète par lecture : chat -> fichier
+  ['bridge','store','ring'].forEach(fid=>{
+    const pts=cometRoute('chat',fid); if(!pts) return;
+    const svg=$('world').querySelector('svg.cables');
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',window.MekiCables.pointsToPath(pts)); p.setAttribute('fill','none'); p.setAttribute('stroke','none');
+    svg.appendChild(p);
+    comet[fid]={pathEl:p,len:p.getTotalLength()};
+  });
+}
+const comet={};
+let cometHead=null, cometTrail=[];
+function ensureCometDots(){
+  const svg=$('world').querySelector('svg.cables');
+  if(cometHead) return;
+  const NS='http://www.w3.org/2000/svg';
+  cometHead=document.createElementNS(NS,'circle'); cometHead.setAttribute('class','comet'); cometHead.setAttribute('r','9');
+  svg.appendChild(cometHead);
+  for(let i=0;i<16;i++){ const c=document.createElementNS(NS,'circle'); c.setAttribute('class','comet-trail');
+    c.setAttribute('r',(7.5*(1-i/16)+1).toFixed(1)); svg.appendChild(c); cometTrail.push(c); }
+}
+function hideComet(){ if(cometHead) cometHead.setAttribute('opacity','0'); cometTrail.forEach(c=>c.setAttribute('opacity','0')); }
+/* anime UNE comète active (la plus récente fenêtre) en fonction de t */
+function drawComet(t){
+  ensureCometDots();
+  // fenêtres de lecture [t0,t1] -> fichier
+  const reads=[['bridge',47000,48800],['store',50000,51800],['ring',53000,54800]];
+  let active=null;
+  for(const [fid,a,b] of reads){ if(t>=a-40 && t<=b+220){ active={fid,a,b}; } }
+  if(!active){ hideComet(); return; }
+  const cm=comet[active.fid]; if(!cm){ hideComet(); return; }
+  const u=easeInOut(prog(t,active.a,active.b));
+  const L=cm.len, at=u*L;
+  const head=cm.pathEl.getPointAtLength(at);
+  cometHead.setAttribute('cx',head.x); cometHead.setAttribute('cy',head.y); cometHead.setAttribute('opacity', t>active.b?String(clamp(1-(t-active.b)/220,0,1)):'1');
+  const STRIDE=5;
+  cometTrail.forEach((c,i)=>{
+    const back=Math.max(0,at-(i+1)*STRIDE*(L/220));
+    const p=cm.pathEl.getPointAtLength(back);
+    c.setAttribute('cx',p.x); c.setAttribute('cy',p.y);
+    c.setAttribute('opacity',(0.6*Math.pow(1-i/16,1.4)*(t>active.b?clamp(1-(t-active.b)/220,0,1):1)).toFixed(3));
+  });
+  // le câble du fichier est TRACÉ par la comète (révélé derrière elle)
+  const cab=cablesById[active.fid];
+  if(cab){ const cl=cab.len; cab.core.style.strokeDasharray=cl+' '+(cl+1);
+    cab.gEl.querySelector('.cable-halo').style.strokeDasharray=cl+' '+(cl+1);
+    const rev=clamp(u*1.18,0,1);
+    cab.core.style.strokeDashoffset=String(cl*(1-rev));
+    cab.gEl.querySelector('.cable-halo').style.strokeDashoffset=String(cl*(1-rev));
+  }
+}
+
+/* ════════════════════════════ CAMÉRA ════════════════════════════ */
+function camFor(cx,cy,z){ return {x:960-cx*z, y:540-cy*z, z}; }
+function camAt(t){
+  // points de contrôle (centre monde + zoom)
+  const wide=camFor(560,560,0.80);
+  const chat=camFor(410,520,1.30);
+  const mat =camFor(840,560,0.80);
+  let c=wide;
+  if(t<22000) c=wide;
+  else if(t<24400){ const u=easeInOut(prog(t,22000,24400)); c={x:lerp(wide.x,chat.x,u),y:lerp(wide.y,chat.y,u),z:lerp(wide.z,chat.z,u)}; }
+  else if(t<44000) c=chat;
+  else if(t<46400){ const u=easeInOut(prog(t,44000,46400)); c={x:lerp(chat.x,mat.x,u),y:lerp(chat.y,mat.y,u),z:lerp(chat.z,mat.z,u)}; }
+  else c=mat;
+  // léger flottement vivant (déterministe), atténué quand on lit le chat
+  const amp=t>24200&&t<44000?2:7;
+  const dx=Math.sin(t/3300)*amp, dy=Math.cos(t/4100)*amp;
+  return {x:c.x+dx,y:c.y+dy,z:c.z};
+}
+
+/* ════════════════════════════ GLOWS (déterministes, par fenêtre) ════════════════════════════ */
+function setGlow(id,level,on){ const w=document.querySelector('.node-wrap[data-id="'+id+'"]'); if(!w)return;
+  ['glow-soft','glow-strong'].forEach(c=>w.classList.remove(c)); if(on) w.classList.add('glow-'+level); }
+
+/* ════════════════════════════ SEEK ════════════════════════════ */
+let built=false;
+function buildStage(){
+  if(built) return; built=true;
+  const world=$('world');
+  NODES.forEach(n=>{
+    const wrap=buildNode(n); world.appendChild(wrap);
+    if(n.kind==='chat'){ buildChatInner(wrap.querySelector('.cmp-node').querySelector('.cmp-chat-host')||(function(){const h=document.createElement('div');h.className='cmp-chat-host';wrap.querySelector('.cmp-node').appendChild(h);return h;})()); }
+  });
+  buildCables();
+  buildCometPaths();
+  // terminal text statique
+  const fx=document.querySelector('#fx');
+  if(fx) fx.innerHTML='<span class="ps">PS</span> <span class="dim">C:\\mekistudio&gt;</span> uv run mekistudio serve\n'
+    +'<span class="ok">✓</span> canvas → <span class="ps">http://127.0.0.1:8777</span>\n'
+    +'<span class="dim">↻ live-reload · brique I — terminal PTY</span>\n'
+    +'<span class="ps">PS</span> <span class="dim">C:\\mekistudio&gt;</span> <span class="cur">▌</span>';
+}
+
+function drawStage(t){
+  const o=win(t,STAGE_IN,STAGE_IN+600,STAGE_OUT-700,STAGE_OUT);
+  const st=$('stage'); st.style.opacity=o; st.style.visibility=o>0?'visible':'hidden';
+  if(o<=0){ ['cap-concept','cap-concept2','cap-chat','cap-spawn','cap-current'].forEach(id=>op(id,0)); hideComet(); return; }
+  // caméra
+  const c=camAt(t);
+  $('world').style.transform='translate('+c.x.toFixed(2)+'px,'+c.y.toFixed(2)+'px) scale('+c.z.toFixed(4)+')';
+  // révélation des nodes + de leur câble
+  NODES.forEach(n=>{
+    const w=document.querySelector('.node-wrap[data-id="'+n.id+'"]'); if(!w) return;
+    const u=easeOut(prog(t,n.rv,n.rv+560));
+    w.style.opacity=u.toFixed(3);
+    w.style.transform=u<1?'translateY('+lerp(14,0,u).toFixed(1)+'px) scale('+lerp(.96,1,u).toFixed(3)+')':'';
+    // câble apparaît avec l'enfant (sauf ceux tracés par la comète : bridge/store/ring)
+    const cab=cablesById[n.id];
+    if(cab && !comet[n.id]){ const cu=easeOut(prog(t,n.rv+120,n.rv+700)); cab.gEl.style.opacity=cu.toFixed(3); }
+  });
+  // courant qui circule : flux ambré sur chaque câble (défile en f(t)), monte en intensité à la matérialisation
+  const baseFlow=win(t,11000,12500,STAGE_OUT-700,STAGE_OUT);
+  const matBoost=prog(t,45000,57000);
+  Object.values(cablesById).forEach(cab=>{
+    if(comet[cab.childId] && t<54900){ cab.flow.style.opacity='0'; return; } // câble fichier encore en construction
+    cab.flow.style.opacity=(baseFlow*(0.30+0.5*matBoost)).toFixed(3);
+    cab.flow.style.strokeDashoffset=String(-(t*0.10)%28);
+  });
+  drawComet(t);
+  // glows : node touché par une lecture s'allume à l'arrivée de la comète
+  setGlow('bridge','strong', t>48600&&t<50400);
+  setGlow('store','strong',  t>51600&&t<53400);
+  setGlow('ring','strong',   t>54600&&t<57600);
+  setGlow('explorer','soft', (t>46500&&t<47600)||(t>49600&&t<50300));
+  setGlow('folder','strong', t>45800&&t<47000);
+  // surlignage de la ligne d'arbre correspondante
+  const hl=(sel,on)=>{const e=document.querySelector(sel); if(e)e.classList.toggle('selected',on);};
+  hl('#ftrow-terminal .fs-row', t>45800&&t<58000);
+  hl('.f-bridge', t>48600&&t<58000); hl('.f-store', t>51600&&t<58000); hl('.f-ring', t>54600&&t<58000);
+
+  // ---- CHAT : streaming déterministe ----
+  drawChat(t);
+
+  // ---- captions du canvas ----
+  cap('cap-concept', t, 11500,16500);
+  cap('cap-concept2',t, 16800,21600);
+  cap('cap-chat',    t, 26000,33000);
+  cap('cap-spawn',   t, 47500,55000);
+  cap('cap-current', t, 57500,65500);
+}
+
+function drawChat(t){
+  const list=$('chat-list'); if(!list) return;
+  // message utilisateur visible dès le début du beat chat
+  const showUser=t>22600;
+  // assistant : tape progressivement entre 27000 et 41000
+  const aText=t>27000 ? typed(CHAT_ASSIST,t,27000,41000) : "";
+  const streaming = t>27000 && t<41200;
+  // tool-cards révélées une à une
+  const toolTimes=[33500,36500,38500,40000];
+  let toolHtml='';
+  const shown=TOOLS.filter((_,i)=>t>toolTimes[i]);
+  if(shown.length){
+    toolHtml='<div class="chat-tools">'+shown.map(tl=>
+      '<div class="chat-tool"><div class="chat-tool-head"><span>'+tl.ico+' </span>'
+      +'<b style="color:'+tl.c+'">'+tl.name+'</b><span class="arg"> '+tl.arg+'</span><span class="st"> ✓</span></div></div>'
+    ).join('')+'</div>';
+  }
+  let html='';
+  if(showUser) html+=chatRow('user','charles','C','<div class="chat-content">'+CHAT_USER+'</div>');
+  if(t>26200){
+    let body='<div class="chat-content">'+renderMd(aText)+(streaming?'<span class="chat-cursor"></span>':'')+'</div>'+toolHtml;
+    html+=chatRow('assistant','Claude','✦',body);
+  }
+  // n'écrit le DOM que si changé (perf + stabilité)
+  if(list.__sig!==html){ list.innerHTML=html; list.__sig=html; }
+  list.scrollTop=list.scrollHeight;
+  // statusbar "Claude écrit…" pendant le streaming
+  const sb=$('chat-status'); if(sb) sb.style.display=streaming?'flex':'none';
+}
+
+/* ════════════════════════════ SCÈNES OVERLAY ════════════════════════════ */
+function drawBoot(t){
+  const o=sceneFade('sc-boot',SC.boot[0],SC.boot[1],t,1,520); if(!o)return;
+  const u=easeOut(prog(t,200,1500));
+  setS('boot-logo','opacity',u); setS('boot-logo','transform','scale('+lerp(.86,1,u).toFixed(3)+')');
+  op('boot-sub',win(t,2100,3000,6600,7100)); setS('boot-sub','transform','translateY('+lerp(10,0,easeOut(prog(t,2100,3000))).toFixed(1)+'px)');
+}
+function drawFeatures(t){
+  const o=sceneFade('sc-features',SC.features[0],SC.features[1],t,560,520); if(!o)return;
+  [['cd0',67150],['cd1',67600],['cd2',68050]].forEach(([id,s])=>{ const u=easeOut(prog(t,s,s+520));
+    setS(id,'opacity',u); setS(id,'transform','translateY('+lerp(30,0,u).toFixed(1)+'px)'); });
+  op('feat-cap',win(t,70000,70700,78600,79100));
+}
+function drawOutro(t){
+  const o=sceneFade('sc-outro',SC.outro[0],SC.outro[1],t,560,1); if(!o)return;
+  const u=easeOut(prog(t,79400,80600));
+  setS('out-logo','opacity',u); setS('out-logo','transform','scale('+lerp(.92,1,u).toFixed(3)+')');
+  op('out-vision',win(t,81000,81900,88990,89000)); setS('out-vision','transform','translateY('+lerp(10,0,easeOut(prog(t,81000,81900))).toFixed(1)+'px)');
+  op('out-term',win(t,83000,83600,88990,89000));
+  setText('out-cmd',typed("uvx mekistudio serve",t,83400,84800));
+  op('out-cur', (t>83400&&t<85200)?1:0);
+  op('out-cta',win(t,85600,86200,88990,89000));
+}
+
+/* ════════════════════════════ POINT D'ENTRÉE ════════════════════════════ */
+function seek(t){
+  buildStage();
+  drawStage(t);
+  drawBoot(t); drawFeatures(t); drawOutro(t);
+  const te=$('t'); if(te) te.textContent=(t/1000).toFixed(2)+'s';
+}
+window.seekFrame=function(t){ seek(t); document.getAnimations().forEach(a=>{ try{ a.pause(); a.currentTime=t; }catch(e){} }); };
+window.seek=seek; window.TL={FPS:FPS,DUR:DUR,SC:SC};
+window.addEventListener('load',()=>{ buildStage(); seek(0); });
+if(location.search.indexOf('debug=1')>=0){ const te=$('t'); if(te)te.style.opacity=.7;
+  window.addEventListener('mousemove',e=>seekFrame(Math.round(DUR*e.clientX/innerWidth))); }
+</script>
+</body>
+</html>
